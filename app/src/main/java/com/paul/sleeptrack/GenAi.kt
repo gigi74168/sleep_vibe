@@ -1,6 +1,5 @@
 package com.paul.sleeptrack
 
-import android.content.Context
 import android.util.Log
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.common.FeatureStatus
@@ -31,8 +30,7 @@ private const val TAG = "GenAi"
  * 2. **Rien ne s'affiche avant [NanoStatus.READY].** Sans ça l'utilisateur voit des erreurs
  *    AICore brutes sur un appareil non supporté.
  * 3. **Uniquement au premier plan.** AICore refuse l'inférence en arrière-plan
- *    (`BACKGROUND_USE_BLOCKED`), ce qui exclut [ReminderReceiver] et le widget. D'où le
- *    cache de [WeeklyBrief].
+ *    (`BACKGROUND_USE_BLOCKED`), ce qui exclut [ReminderReceiver] et le widget.
  *
  * Ces APIs sont en Beta : pas de SLA, et les signatures peuvent changer d'une version à
  * l'autre. Les conditions d'utilisation sont celles des ML Kit GenAI API Additional Terms.
@@ -123,46 +121,6 @@ class Nano : AutoCloseable {
     suspend fun comment(metric: Metric, data: HealthData, goalMinutes: Int, year: Int): String? =
         generate(COMMENT_INSTRUCTION, metricFacts(metric, data, goalMinutes, year), maxTokens = 160, temp = 0.3f)
 
-    // ----------------------------------------------------------- Résumé hebdo
-
-    suspend fun weeklyBrief(data: HealthData, today: LocalDate = LocalDate.now()): String? {
-        // Sans nuit récente il n'y a rien à résumer, et surtout rien à mettre en cache :
-        // l'écran des réglages peut très bien être ouvert sur une année passée.
-        if (data.nights.keys.none { it > today.minusDays(7) }) return null
-        return generate(WEEKLY_INSTRUCTION, weekFacts(data, today), maxTokens = 140, temp = 0.3f)
-    }
-
-    // -------------------------------------------------------------- Discussion
-
-    /**
-     * Une réponse dans la discussion. Contrairement à [askGrid], le modèle voit ici les
-     * chiffres de santé : c'est le principe même d'une discussion sur ses données. Il les
-     * reçoit tout calculés par [chatFacts], avec la même consigne qu'ailleurs — n'en
-     * inventer aucun — et l'autorisation, propre à ce mode, de recommander.
-     *
-     * Le Prompt API n'a pas de session de conversation : l'historique est remis dans le
-     * prompt à chaque tour, raccourci pour tenir dans les 4000 tokens d'entrée.
-     */
-    suspend fun chat(facts: String, history: List<ChatMessage>, question: String): String? {
-        if (question.isBlank()) return null
-        val prompt = buildString {
-            appendLine("Données de l'utilisateur, calculées par l'app :")
-            appendLine(facts.trim())
-            val recent = history.takeLast(CHAT_TURNS_KEPT)
-            if (recent.isNotEmpty()) {
-                appendLine()
-                appendLine("Conversation jusqu'ici :")
-                recent.forEach { message ->
-                    val who = if (message.fromUser) "Utilisateur" else "Assistant"
-                    appendLine("$who : ${message.text.trim().take(CHAT_MESSAGE_CHARS)}")
-                }
-            }
-            appendLine()
-            append("Nouvelle question : ${question.trim().take(CHAT_MESSAGE_CHARS)}")
-        }
-        return generate(CHAT_INSTRUCTION, prompt, maxTokens = 256, temp = 0.4f)
-    }
-
     // ------------------------------------------------------ Question de grille
 
     /**
@@ -199,27 +157,6 @@ private const val COMMENT_INSTRUCTION =
         "texte. Aucun conseil médical, aucun diagnostic, aucune recommandation. Pas de " +
         "liste, pas de titre, pas d'emoji. Dis ce que le croisement des chiffres montre, " +
         "ne les répète pas un par un."
-
-private const val WEEKLY_INSTRUCTION =
-    "Tu rédiges le corps d'une notification de résumé hebdomadaire, en français. Deux " +
-        "phrases maximum, 250 caractères maximum, ton factuel. N'utilise que les chiffres " +
-        "fournis : n'en invente aucun, n'en recalcule aucun. Aucun conseil médical, " +
-        "aucune recommandation. Pas de titre, pas de liste, pas d'emoji."
-
-private const val CHAT_INSTRUCTION =
-    "Tu es l'assistant de l'app Sommeil. Tu réponds en français aux questions de " +
-        "l'utilisateur sur ses propres données, fournies dans le message. N'utilise que les " +
-        "chiffres fournis : n'en invente aucun, n'en recalcule aucun ; s'il manque une " +
-        "information, dis-le simplement. Tu peux recommander des habitudes (régularité, " +
-        "écran le soir, activité, objectif de sommeil) : chaque recommandation cite le " +
-        "chiffre qui la motive. Jamais de diagnostic, de médicament ni de complément " +
-        "alimentaire. Si l'utilisateur décrit un symptôme ou une inquiétude de santé, " +
-        "invite-le à en parler à un médecin. Cinq phrases maximum, tutoiement, pas de " +
-        "titre, pas d'emoji."
-
-/** Messages remis au modèle à chaque tour : assez pour suivre, pas assez pour déborder. */
-private const val CHAT_TURNS_KEPT = 6
-private const val CHAT_MESSAGE_CHARS = 500
 
 private const val ASK_INSTRUCTION =
     "Tu traduis une question en français en un objet JSON, et rien d'autre. Réponds " +
@@ -282,144 +219,6 @@ fun metricFacts(metric: Metric, data: HealthData, goalMinutes: Int, year: Int): 
     }
 }
 
-/** Les chiffres de la semaine écoulée, pour la notification du dimanche. */
-fun weekFacts(data: HealthData, today: LocalDate = LocalDate.now()): String {
-    val week = data.nights.filterKeys { it > today.minusDays(7) }.values
-    val previous = data.nights.filterKeys { it <= today.minusDays(7) && it > today.minusDays(14) }.values
-    val steps = data.steps.filterKeys { it > today.minusDays(7) }.values
-    val heart = data.heart.filterKeys { it > today.minusDays(7) }.values
-
-    return buildString {
-        if (week.isEmpty()) {
-            appendLine("Aucune nuit enregistrée cette semaine.")
-            return@buildString
-        }
-        val average = Duration.ofSeconds(week.sumOf { it.seconds } / week.size)
-        appendLine("Nuits enregistrées cette semaine : ${week.size}.")
-        appendLine("Sommeil moyen cette semaine : ${formatDuration(average)}.")
-        if (previous.isNotEmpty()) {
-            val before = Duration.ofSeconds(previous.sumOf { it.seconds } / previous.size)
-            val delta = average.minus(before).toMinutes()
-            appendLine("Semaine précédente : ${formatDuration(before)}.")
-            appendLine("Écart : ${if (delta >= 0) "+" else ""}$delta minutes.")
-        }
-        appendLine("Nuit la plus longue : ${formatDuration(week.max())}.")
-        appendLine("Nuit la plus courte : ${formatDuration(week.min())}.")
-        if (steps.isNotEmpty()) appendLine("Pas par jour : ${formatSteps(steps.sum() / steps.size)}.")
-        if (heart.isNotEmpty()) appendLine("Cœur au repos moyen : %.0f bpm.".format(heart.average()))
-    }
-}
-
-/** Un message de la discussion. Gardé en mémoire le temps de l'écran, jamais écrit. */
-data class ChatMessage(val fromUser: Boolean, val text: String)
-
-/**
- * Tout ce que le modèle sait de l'utilisateur pendant une discussion : les tuiles, séries et
- * semaine type de chaque métrique visible, les deux liens avec la nuit qui suit, et le détail
- * des derniers jours. Tout est calculé ici, par l'app ; environ 800 tokens pour une année
- * pleine, ce qui laisse la place à l'historique sous la limite de 4000.
- */
-fun chatFacts(
-    data: HealthData,
-    visible: List<Metric>,
-    goalMinutes: Int,
-    year: Int,
-    today: LocalDate = LocalDate.now(),
-): String = buildString {
-    appendLine("Aujourd'hui : $today (${dayName(today.dayOfWeek)}). Année affichée : $year.")
-    appendLine("Objectif de sommeil : ${formatDuration(Duration.ofMinutes(goalMinutes.toLong()))} par nuit.")
-
-    for (metric in visible) {
-        val series = data.series(metric)
-        if (series.isEmpty()) {
-            appendLine("${metric.detailLabel} : aucune donnée.")
-            continue
-        }
-        val parts = mutableListOf(metric.countLabel(series.size))
-        statTiles(metric, data, scaleFor(metric, data)).forEach { parts += "${it.label.lowercase()} ${it.value}" }
-        streakTiles(metric, data, goalMinutes, year, today)?.let { (current, best) ->
-            parts += "${current.label.lowercase()} ${current.value}"
-            parts += "${best.label.lowercase()} ${best.value}"
-        }
-        val averages = weekAverages(series)
-        if (averages.size == 7 && series.size >= 21) {
-            val high = averages.maxBy { it.value }
-            val low = averages.minBy { it.value }
-            parts += "jour le plus haut ${dayName(high.key)} (${metric.format(high.value)})"
-            parts += "jour le plus bas ${dayName(low.key)} (${metric.format(low.value)})"
-        }
-        appendLine("${metric.detailLabel} : ${parts.joinToString(" ; ")}.")
-    }
-
-    if (Metric.STEPS in visible) {
-        correlationInsight(data)?.let { link ->
-            append("Lien pas d'une journée → nuit suivante : r = %.2f sur %d paires (%s)"
-                .format(Locale.FRENCH, link.r, link.count, link.strength.lowercase()))
-            val active = link.afterActive
-            val quiet = link.afterQuiet
-            if (active != null && quiet != null) {
-                append(" ; après 8 000 pas ou plus ${formatDuration(active)}, après une journée calme ${formatDuration(quiet)}")
-            }
-            appendLine(".")
-        }
-    }
-    if (Metric.SCREEN in visible) {
-        screenSleepLink(data)?.let { link ->
-            append("Lien temps d'écran d'une journée → nuit suivante : r = %.2f sur %d paires (%s)"
-                .format(Locale.FRENCH, link.r, link.count, link.strength.lowercase()))
-            val heavy = link.afterActive
-            val light = link.afterQuiet
-            if (heavy != null && light != null) {
-                append(" ; après 4h d'écran ou plus ${formatDuration(heavy)}, après moins ${formatDuration(light)}")
-            }
-            appendLine(".")
-        }
-    }
-
-    // Le détail jour par jour, pour les questions sur « hier » ou « la semaine dernière ».
-    val days = visible.flatMap { data.series(it).keys }.toSortedSet().toList().takeLast(14)
-    if (days.isNotEmpty()) {
-        appendLine("Derniers jours enregistrés :")
-        for (day in days) {
-            val values = visible.mapNotNull { metric ->
-                data.series(metric)[day]?.let { "${metric.detailLabel.lowercase()} ${metric.format(it)}" }
-            }
-            appendLine("- $day (${dayName(day.dayOfWeek)}) : ${values.joinToString(", ")}")
-        }
-    }
-}
-
-/**
- * Le temps d'écran d'une journée face à la nuit qui la suit, calculé comme le lien avec les
- * pas pour que les deux se lisent pareil. Seuil à 4h : sous ce seuil, les écarts de sommeil
- * se perdent dans le bruit d'une nuit à l'autre.
- */
-internal fun screenSleepLink(data: HealthData): CorrelationInsight? {
-    val pairs = data.screen.mapNotNull { (day, minutes) ->
-        data.nights[day.plusDays(1)]?.let { minutes to it.toMinutes().toDouble() }
-    }
-    if (pairs.size < 7) return null
-    val mx = pairs.sumOf { it.first } / pairs.size
-    val my = pairs.sumOf { it.second } / pairs.size
-    var sxy = 0.0
-    var sxx = 0.0
-    var syy = 0.0
-    for ((x, y) in pairs) {
-        sxy += (x - mx) * (y - my)
-        sxx += (x - mx) * (x - mx)
-        syy += (y - my) * (y - my)
-    }
-    if (sxx == 0.0 || syy == 0.0) return null
-    fun mean(values: List<Double>) =
-        values.takeIf { it.size >= 3 }?.let { Duration.ofMinutes(it.average().toLong()) }
-    return CorrelationInsight(
-        r = sxy / kotlin.math.sqrt(sxx * syy),
-        count = pairs.size,
-        afterActive = mean(pairs.filter { it.first >= 240 }.map { it.second }),
-        afterQuiet = mean(pairs.filter { it.first < 240 }.map { it.second }),
-    )
-}
-
 private fun dayName(day: DayOfWeek): String = day.getDisplayName(TextStyle.FULL, Locale.FRENCH)
 
 // -------------------------------------------------------------------- Parsing
@@ -449,45 +248,4 @@ internal fun parseGridQuery(raw: String, years: List<Int>): GridQuery? {
         if (years.none { it in from.year..to.year }) return null
         GridQuery(metric, from, to)
     }.getOrNull()
-}
-
-// ------------------------------------------------- Résumé hebdo mis en cache
-
-/**
- * Le texte du résumé du dimanche, rédigé pendant que l'app est ouverte et relu par
- * [ReminderReceiver] au moment de notifier.
- *
- * Ce détour n'est pas une optimisation : AICore refuse l'inférence en arrière-plan, et la
- * notification part d'un BroadcastReceiver. Sans cache, pas de résumé rédigé du tout.
- *
- * Le cache porte la date de fin de la semaine qu'il décrit. Passé [MAX_AGE_DAYS], on
- * retombe sur le texte calculé plutôt que d'annoncer les chiffres d'une autre semaine.
- */
-object WeeklyBrief {
-    private const val TEXT = "ai_weekly_text"
-    private const val COVERS = "ai_weekly_covers"
-    private const val MAX_AGE_DAYS = 2L
-
-    fun store(context: Context, text: String, covers: LocalDate = LocalDate.now()) {
-        Prefs.of(context).edit()
-            .putString(TEXT, text)
-            .putString(COVERS, covers.toString())
-            .apply()
-    }
-
-    fun load(context: Context, today: LocalDate = LocalDate.now()): String? {
-        val prefs = Prefs.of(context)
-        val text = prefs.getString(TEXT, null)?.takeIf { it.isNotBlank() } ?: return null
-        val covers = runCatching { LocalDate.parse(prefs.getString(COVERS, "")) }.getOrNull() ?: return null
-        val age = Duration.between(covers.atStartOfDay(), today.atStartOfDay()).toDays()
-        return text.takeIf { age in 0..MAX_AGE_DAYS }
-    }
-
-    fun clear(context: Context) {
-        Prefs.of(context).edit().remove(TEXT).remove(COVERS).apply()
-    }
-
-    /** Vrai si le cache mérite d'être régénéré maintenant que l'app est au premier plan. */
-    fun isStale(context: Context, today: LocalDate = LocalDate.now()): Boolean =
-        load(context, today) == null
 }

@@ -97,21 +97,8 @@ object Reminders {
             "soit $missing min sous ton objectif de ${formatDuration(goal)}."
     }
 
-    /**
-     * Texte du résumé hebdomadaire.
-     *
-     * Si l'app a préparé un texte rédigé par Gemini Nano pendant qu'elle était ouverte, on
-     * l'emploie. Impossible de le rédiger ici : AICore refuse l'inférence en arrière-plan,
-     * et on arrive d'un BroadcastReceiver. [WeeklyBrief] ne rend son texte que s'il décrit
-     * bien la semaine en cours, sinon on retombe sur le résumé calculé ci-dessous.
-     */
-    fun weeklyMessage(context: Context, data: HealthData): Pair<String, String>? {
-        val computed = weeklyFallback(data) ?: return null
-        return WeeklyBrief.load(context)?.let { "Ta semaine" to it } ?: computed
-    }
-
-    /** Le résumé gabarité, toujours disponible : il ne dépend d'aucun modèle. */
-    fun weeklyFallback(data: HealthData): Pair<String, String>? {
+    /** Texte du résumé hebdomadaire, calculé sur le téléphone. */
+    fun weeklyMessage(data: HealthData): Pair<String, String>? {
         val today = LocalDate.now()
         val week = data.nights.filterKeys { it > today.minusDays(7) }.values
         if (week.isEmpty()) return null
@@ -185,7 +172,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     ACTION_EVENING -> Reminders.eveningMessage(app, data)?.let { (title, body) ->
                         Reminders.notify(app, Reminders.NOTIFICATION_EVENING, Reminders.CHANNEL_EVENING, "Rappel du soir", title, body)
                     }
-                    ACTION_WEEKLY -> Reminders.weeklyMessage(app, data)?.let { (title, body) ->
+                    ACTION_WEEKLY -> Reminders.weeklyMessage(data)?.let { (title, body) ->
                         Reminders.notify(app, Reminders.NOTIFICATION_WEEKLY, Reminders.CHANNEL_WEEKLY, "Résumé hebdomadaire", title, body)
                     }
                 }

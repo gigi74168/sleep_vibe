@@ -35,9 +35,7 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 - **Rappels** (optionnels) : rappel du soir quand la moyenne des 7 derniers jours passe sous l'objectif,
   et résumé du dimanche comparant la semaine à la précédente. Calculés sur le téléphone.
 - **Commentaires hors ligne** (appareils compatibles) : deux phrases qui croisent tes chiffres,
-  une barre pour interroger la grille en français (« mes nuits de janvier »), le résumé du
-  dimanche rédigé plutôt que gabarité, et une **discussion** avec tes données qui peut proposer
-  des pistes personnalisées. Tout est produit par [Gemini Nano](https://developers.google.com/ml-kit/genai)
+  et une barre pour interroger la grille en français (« mes nuits de janvier »). Tout est produit par [Gemini Nano](https://developers.google.com/ml-kit/genai)
   sur le téléphone, à partir des statistiques que l'app a déjà calculées — voir
   [Commentaires hors ligne](#commentaires-hors-ligne).
 - **Widget** d'écran d'accueil : les dernières semaines de la métrique choisie dans les réglages,
@@ -69,15 +67,13 @@ de l'année affichée (du plus léger au plus lourd), avec les seuils réels en 
 
 ## Commentaires hors ligne
 
-Quatre fonctions s'appuient sur les [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai)
+Deux fonctions s'appuient sur les [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai)
 (Prompt API, `com.google.mlkit:genai-prompt`), qui font tourner Gemini Nano sur l'appareil :
 
 | Fonction | Où |
 | --- | --- |
 | « Ce qui ressort » : deux phrases qui croisent moyenne, séries, semaine type et corrélation | sous les panneaux de la métrique affichée |
 | « Poser une question » : une période en français, la grille saute dessus et estompe le reste | sous la grille |
-| Résumé du dimanche rédigé | notification hebdomadaire |
-| « Discuter avec tes données » : questions libres et recommandations tirées de tes chiffres | écran dédié, sous la grille |
 
 **Le modèle rédige, il ne compte pas.** Tous les chiffres qu'il reçoit sont déjà calculés par
 l'app, et la consigne lui interdit d'en inventer ou d'en recalculer. La barre de question va
@@ -85,28 +81,15 @@ plus loin : le modèle n'y voit aucune donnée de santé, seulement la date du j
 disponibles, et ne renvoie qu'une métrique et deux dates que l'app applique elle-même. Une
 réponse mal formée est rejetée plutôt qu'interprétée au jugé.
 
-**La discussion est la seule à voir tes chiffres et la seule à recommander.** Elle reçoit les
-tuiles, séries et semaine type de chaque métrique visible, les liens pas → nuit et écran → nuit,
-et le détail des quatorze derniers jours, le tout calculé par l'app. La consigne l'autorise à
-proposer des habitudes (régularité, écran le soir, activité, objectif) à condition de citer le
-chiffre qui les motive, et lui interdit diagnostic, médicament et complément : elle renvoie vers
-un médecin dès qu'un symptôme est évoqué. Rien de la conversation n'est écrit sur le disque.
-
 ### Ce qui ne marche pas, et pourquoi
 
 - **Tous les téléphones ne sont pas concernés.** Le Prompt API couvre une liste plus courte que
   les autres APIs ML Kit, et exclut les appareils au bootloader déverrouillé. Quand le modèle
-  n'est pas disponible, les trois premières fonctions disparaissent : l'app est alors celle
-  d'avant, sans bouton grisé ni message d'erreur. L'entrée « Discuter » reste, elle, et explique
-  pourquoi elle ne répond pas : une fonction demandée explicitement ne doit pas sembler en panne. Liste à jour :
+  n'est pas disponible, ces deux fonctions disparaissent : l'app est alors exactement celle
+  d'avant, sans bouton grisé ni message d'erreur. Liste à jour :
   [device support](https://developers.google.com/ml-kit/genai#device-support).
 - **Pas d'inférence en arrière-plan.** AICore la refuse (`BACKGROUND_USE_BLOCKED`), ce qui exclut
-  le widget et le `BroadcastReceiver` des rappels. Le résumé du dimanche est donc rédigé pendant
-  que l'app est ouverte et relu au moment de notifier ; il se périme au bout de deux jours, après
-  quoi la notification retombe sur le résumé calculé. Les réglages montrent l'état du cache et
-  permettent de le refaire à la demande.
-- **Le résumé n'est pas en Summarization.** Cette API ne parle qu'anglais, japonais et coréen.
-  D'où le Prompt API partout, avec une consigne de langue.
+  le widget et les rappels : le résumé du dimanche reste celui calculé par l'app.
 - **APIs en Beta** : pas de SLA, et les signatures peuvent changer. Les
   [ML Kit GenAI API Additional Terms](https://developers.google.com/ml-kit/genai-terms)
   s'appliquent. Aucun coût : l'inférence tourne sur l'appareil, il n'y a pas d'endpoint facturé.

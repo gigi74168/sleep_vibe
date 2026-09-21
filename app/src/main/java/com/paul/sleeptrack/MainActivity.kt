@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,6 +43,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Un arrêt forcé annule les alarmes : on les repose à chaque lancement.
         Reminders.reschedule(this)
+        // Le résumé du dimanche rédigé par le modèle a été retiré en 2.7 : on efface le
+        // dernier texte préparé, dérivé des données de santé, que plus rien ne lira.
+        Prefs.of(this).edit().remove("ai_weekly_text").remove("ai_weekly_covers").apply()
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Palette.bg, surface = Palette.card)) {
@@ -69,9 +71,6 @@ private fun SleepApp() {
     var visibleMetrics by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
     var demo by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
-    var chat by remember { mutableStateOf(false) }
-    // Hissé ici pour que la discussion puisse ramener la page en bas à chaque réponse.
-    val pageScroll = rememberScrollState()
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
@@ -132,24 +131,12 @@ private fun SleepApp() {
             .fillMaxSize()
             .background(Palette.bg)
             .systemBarsPadding()
-            // Sans ça, le clavier recouvre le champ de saisie de la discussion.
+            // Sans ça, le clavier recouvre la barre de question.
             .imePadding()
-            .verticalScroll(pageScroll)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // Le geste retour ferme la discussion au lieu de quitter l'app.
-        BackHandler(enabled = chat) { chat = false }
-
         when {
-            chat -> ChatScreen(
-                data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
-                visible = visibleMetrics,
-                goalMinutes = display.goalMinutes,
-                year = year,
-                demo = demo,
-                pageScroll = pageScroll,
-                onBack = { chat = false },
-            )
             settings -> SettingsScreen(
                 data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
                 onBack = {
@@ -209,7 +196,6 @@ private fun SleepApp() {
                     onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
                     onExitDemo = { demo = false },
                     onSettings = { settings = true },
-                    onChat = { chat = true },
                 )
             }
         }
@@ -230,7 +216,6 @@ private fun MainScreen(
     onRequestPermissions: () -> Unit,
     onExitDemo: () -> Unit,
     onSettings: () -> Unit,
-    onChat: () -> Unit,
 ) {
     val context = LocalContext.current
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
@@ -330,27 +315,6 @@ private fun MainScreen(
                 }
             }
         }
-        if (display.ai) {
-            Panel {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onChat)
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Discuter avec tes données", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Questions et pistes personnalisées, rédigées sur le téléphone",
-                            color = Palette.muted,
-                            fontSize = 12.sp,
-                        )
-                    }
-                    Text("›", color = Palette.muted, fontSize = 26.sp)
-                }
-            }
-        }
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
@@ -403,17 +367,6 @@ private fun MainScreen(
             data.steps.isNotEmpty() && data.nights.isNotEmpty()
         ) {
             Panel { CorrelationPanel(data, showNotes = display.notes) }
-        }
-
-        // Le résumé du dimanche est rédigé ici, pendant que l'app est au premier plan :
-        // AICore refuse l'inférence depuis un BroadcastReceiver, donc la notification ne
-        // saura que relire ce qui aura été préparé. On ne le prépare que depuis l'année en
-        // cours, seule à contenir les sept derniers jours.
-        LaunchedEffect(nano.ready, data, year) {
-            if (!display.ai || !nano.ready || demo) return@LaunchedEffect
-            if (year != currentYear || !Prefs.weeklyEnabled(context)) return@LaunchedEffect
-            if (!WeeklyBrief.isStale(context)) return@LaunchedEffect
-            nano.weeklyBrief(data)?.let { WeeklyBrief.store(context, it) }
         }
 
         if (display.ai) {
@@ -608,8 +561,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     var confirmClear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val nano = rememberNano()
-    var briefReady by remember { mutableStateOf(WeeklyBrief.load(context) != null) }
-    var briefRunning by remember { mutableStateOf(false) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -681,7 +632,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     }
 
     fun sampleWeekly() {
-        val message = Reminders.weeklyMessage(context, data)
+        val message = Reminders.weeklyMessage(data)
             ?: ("Ta semaine" to "Pas encore assez de nuits enregistrées pour un résumé.")
         Reminders.notify(
             context, Reminders.NOTIFICATION_SAMPLE, Reminders.CHANNEL_WEEKLY,
@@ -765,41 +716,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                     }
                 }) {
                     Text("Voir un exemple de résumé", color = Palette.text)
-                }
-
-                // Le résumé rédigé par Gemini Nano ne peut pas être produit au moment de
-                // notifier : AICore refuse l'inférence en arrière-plan. Il se prépare donc
-                // ici, app ouverte, et la notification le relit dimanche.
-                if (weekly && nano.ready) {
-                    Text(
-                        if (briefReady) {
-                            "Un résumé rédigé par le modèle local est prêt. Il se périme au " +
-                                "bout de deux jours : rouvrir l'app avant dimanche le refait."
-                        } else {
-                            "Le résumé du dimanche sera gabarité, faute de texte préparé. " +
-                                "Le modèle local ne peut pas rédiger pendant que l'app est fermée."
-                        },
-                        color = Palette.muted,
-                        fontSize = 12.sp,
-                    )
-                    TextButton(
-                        onClick = {
-                            briefRunning = true
-                            scope.launch {
-                                val text = nano.weeklyBrief(data)
-                                if (text != null) WeeklyBrief.store(context, text)
-                                briefReady = text != null
-                                briefRunning = false
-                            }
-                        },
-                        enabled = !briefRunning,
-                    ) {
-                        Text(
-                            if (briefRunning) "Rédaction…" else "Préparer le résumé maintenant",
-                            color = Palette.muted,
-                            fontSize = 13.sp,
-                        )
-                    }
                 }
             }
         }
@@ -911,15 +827,14 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 SettingSwitch(
                     title = "Commentaires du modèle local",
                     subtitle = if (nano.ready) {
-                        "Commentaires, barre de question et discussion, sur le téléphone"
+                        "Deux phrases rédigées sur le téléphone, et la barre de question"
                     } else {
-                        "Ce téléphone ne fait pas tourner le modèle ; masque aussi l'entrée « Discuter »"
+                        "Ce téléphone ne fait pas tourner le modèle : sans effet ici"
                     },
                     checked = display.ai,
                 ) { on ->
                     Prefs.setFlag(context, Prefs.SHOW_AI, on)
                     display = Prefs.display(context)
-                    if (!on) WeeklyBrief.clear(context)
                 }
             }
         }
