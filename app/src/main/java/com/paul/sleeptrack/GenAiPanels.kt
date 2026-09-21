@@ -43,19 +43,10 @@ import java.time.LocalDate
  */
 class NanoState(val nano: Nano) {
     var status by mutableStateOf(NanoStatus.UNSUPPORTED)
-    /** Faux tant qu'AICore n'a pas répondu : « non supporté » n'est alors qu'une valeur d'attente. */
-    var checked by mutableStateOf(false)
     var downloaded by mutableStateOf(0L)
     var expected by mutableStateOf(0L)
 
     val ready: Boolean get() = status == NanoStatus.READY
-
-    /**
-     * Rédige le résumé de la semaine. Exposé ici plutôt que d'obliger les appelants à
-     * traverser [nano] : le résumé se demande depuis l'écran principal et depuis les
-     * réglages, et `nano.nano.weeklyBrief(...)` se lit mal.
-     */
-    suspend fun weeklyBrief(data: HealthData): String? = nano.weeklyBrief(data)
 }
 
 /**
@@ -70,7 +61,6 @@ fun rememberNano(): NanoState {
     }
     LaunchedEffect(Unit) {
         state.status = state.nano.status()
-        state.checked = true
     }
     return state
 }
