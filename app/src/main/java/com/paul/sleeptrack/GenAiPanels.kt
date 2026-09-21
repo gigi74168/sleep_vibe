@@ -43,6 +43,8 @@ import java.time.LocalDate
  */
 class NanoState(val nano: Nano) {
     var status by mutableStateOf(NanoStatus.UNSUPPORTED)
+    /** Faux tant qu'AICore n'a pas répondu : « non supporté » n'est alors qu'une valeur d'attente. */
+    var checked by mutableStateOf(false)
     var downloaded by mutableStateOf(0L)
     var expected by mutableStateOf(0L)
 
@@ -68,6 +70,7 @@ fun rememberNano(): NanoState {
     }
     LaunchedEffect(Unit) {
         state.status = state.nano.status()
+        state.checked = true
     }
     return state
 }
