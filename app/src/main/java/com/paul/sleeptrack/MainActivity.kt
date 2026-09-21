@@ -6,7 +6,9 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,9 +34,12 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.time.Duration
 import java.time.LocalDate
 
@@ -56,7 +61,7 @@ private sealed interface UiState {
     data object Loading : UiState
     data object NotInstalled : UiState
     data object NeedsPermission : UiState
-    data class Ready(val data: HealthData, val missing: Set<String>) : UiState
+    data class Ready(val data: HealthData, val missing: Set<String>, val warning: String? = null) : UiState
     data class Error(val message: String) : UiState
 }
 
@@ -71,10 +76,25 @@ private fun SleepApp() {
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
+    // Années déjà lues en direct dans Health Connect depuis le lancement de l'app :
+    // sert à éviter de retaper toute une année à chaque retour au premier plan.
+    val fetchedYears = remember { mutableStateOf(setOf<Int>()) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { refreshKey++ }
+
+    // Retour (bouton ou geste) depuis les réglages : revient à l'écran principal au lieu
+    // d'éteindre l'app, en appliquant les mêmes effets que le bouton "Retour".
+    val closeSettings: () -> Unit = {
+        settings = false
+        visibleMetrics = Prefs.visibleMetrics(context)
+        display = Prefs.display(context)
+        if (metric !in visibleMetrics) metric = Metric.SLEEP
+        updateAllWidgets(context)
+        refreshKey++
+    }
+    BackHandler(enabled = settings) { closeSettings() }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshKey++ }
 
@@ -97,29 +117,177 @@ private fun SleepApp() {
             return@LaunchedEffect
         }
         val client = HealthConnectClient.getOrCreate(context)
-        state = try {
-            val granted = client.permissionController.getGrantedPermissions()
+        try {
+            // Un appel Health Connect (y compris la simple vérif des permissions) peut
+            // rester bloqué sans jamais répondre plutôt que de renvoyer une erreur —
+            // ça s'est vu. Cet appel-là est local et léger, 15s est largement assez.
+            val granted = withTimeout(15_000) { client.permissionController.getGrantedPermissions() }
+            Log.i("SleepTrack-HC", "Permissions Health Connect accordées : ${granted.sorted()}")
             if (DATA_PERMISSIONS.values.none { it in granted }) {
-                if (archived.isEmpty()) {
+                state = if (archived.isEmpty()) {
                     UiState.NeedsPermission
                 } else {
                     UiState.Ready(archived, REQUESTED_PERMISSIONS - granted)
                 }
-            } else {
-                // Health Connect a le dernier mot sur les jours qu'il connaît ; l'archive
-                // comble le reste.
-                val data = archived + loadYear(client, granted, year)
-                withContext(Dispatchers.IO) { Archive.merge(context, data) }
-                // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
-                // passage sur l'année en cours.
-                if (year == LocalDate.now().year) {
-                    DataCache.save(context, data)
-                    updateAllWidgets(context)
-                }
-                UiState.Ready(data, REQUESTED_PERMISSIONS - granted)
+                return@LaunchedEffect
             }
+            val today = LocalDate.now()
+            val alreadyFetched = year in fetchedYears.value
+            when {
+                // Année passée déjà lue une fois cette session : ses données ne
+                // bougent plus, inutile de retaper Health Connect à chaque retour au
+                // premier plan — c'est ça qui faisait taper le rate limit en boucle.
+                // On se contente de l'archive.
+                alreadyFetched && year != today.year -> {
+                    state = UiState.Ready(archived, REQUESTED_PERMISSIONS - granted)
+                }
+                // Année en cours déjà lue une fois : on ne relit que les derniers
+                // jours (seuls susceptibles d'avoir changé), pas toute l'année. La
+                // table sommeil peut être énorme (des milliers de fragments écrits par
+                // une app de synchro) : on borne chaque sous-lecture pour ne jamais
+                // bloquer le lancement là-dessus.
+                alreadyFetched -> {
+                    val aggregatePart = try {
+                        withTimeout(20_000) { loadAggregated(client, granted, today.minusDays(3), today) }
+                    } catch (e: TimeoutCancellationException) {
+                        PartialResult(HealthData(), rateLimited = true)
+                    }
+                    val sleepPart = if (PERMISSION_READ_SLEEP in granted) {
+                        try {
+                            withTimeout(10_000) { readSleepByNight(client, today.minusDays(3), today) }
+                        } catch (e: TimeoutCancellationException) {
+                            PartialResult<Map<LocalDate, Duration>>(emptyMap(), rateLimited = true)
+                        } catch (e: Exception) {
+                            Log.w("SleepTrack-HC", "Échec sommeil récent : ${e.message}", e)
+                            PartialResult<Map<LocalDate, Duration>>(emptyMap(), rateLimited = true)
+                        }
+                    } else {
+                        PartialResult<Map<LocalDate, Duration>>(emptyMap(), rateLimited = false)
+                    }
+                    val fresh = HealthLoadResult(
+                        data = aggregatePart.data + HealthData(nights = sleepPart.data),
+                        rateLimited = aggregatePart.rateLimited || sleepPart.rateLimited,
+                    )
+                    val data = archived + fresh.data
+                    withContext(Dispatchers.IO) { Archive.merge(context, data) }
+                    if (year == today.year) {
+                        DataCache.save(context, data)
+                        updateAllWidgets(context)
+                    }
+                    val warning = if (fresh.rateLimited) {
+                        "Health Connect a limité ou ralenti certaines requêtes : des données récentes n'ont peut-être pas pu être lues."
+                    } else {
+                        null
+                    }
+                    state = UiState.Ready(data, REQUESTED_PERMISSIONS - granted, warning)
+                }
+                // Premier passage sur cette année cette session : on lit d'abord les
+                // métriques agrégées (pas, cœur, poids) sur toute l'année en quelques
+                // appels — c'est rapide et affiche tout de suite la moitié de l'écran.
+                // Puis on comble le sommeil semaine par semaine, la plus récente en
+                // premier (affichage rapide), chaque semaine lue venant enrichir
+                // l'écran et l'archive au fur et à mesure — plutôt que de faire
+                // attendre l'écran sur l'année entière (ou même un mois) d'un coup.
+                else -> {
+                    var accumulated = archived
+                    var anyIssue = false
+                    fun warning() = if (anyIssue) {
+                        "Health Connect a limité ou ralenti certaines requêtes : des périodes plus anciennes n'ont peut-être pas encore été chargées. Réessaie plus tard pour compléter."
+                    } else {
+                        null
+                    }
+
+                    val baseResult = try {
+                        withTimeout(60_000) {
+                            loadAggregated(
+                                client, granted,
+                                LocalDate.of(year, 1, 1),
+                                minOf(LocalDate.of(year, 12, 31), today),
+                            )
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        PartialResult(HealthData(), rateLimited = true)
+                    }
+                    anyIssue = baseResult.rateLimited
+                    accumulated += baseResult.data
+                    withContext(Dispatchers.IO) { Archive.merge(context, accumulated) }
+                    state = UiState.Ready(accumulated, REQUESTED_PERMISSIONS - granted, warning())
+
+                    var consecutiveTimeouts = 0
+                    for ((from, to) in weekChunks(year)) {
+                        if (PERMISSION_READ_SLEEP !in granted) {
+                            Log.w("SleepTrack-HC", "Permission sommeil non accordée : lectures nocturnes sautées")
+                            break
+                        }
+                        val result = try {
+                            withTimeout(120_000) { readSleepByNight(client, from, to) }
+                        } catch (e: TimeoutCancellationException) {
+                            Log.w("SleepTrack-HC", "Timeout sommeil $from..$to")
+                            PartialResult<Map<LocalDate, Duration>>(emptyMap(), rateLimited = true)
+                        } catch (e: Exception) {
+                            // Une lecture qui coince ne doit pas faire planter tout le
+                            // chargement : on loggue, on marque le partiel et on passe.
+                            Log.w("SleepTrack-HC", "Échec lecture sommeil $from..$to : ${e.message}", e)
+                            PartialResult<Map<LocalDate, Duration>>(emptyMap(), rateLimited = true)
+                        }
+                        Log.i("SleepTrack-HC", "Sommeil $from..$to : ${result.data.size} nuits, rateLimited=${result.rateLimited}")
+                        anyIssue = anyIssue || result.rateLimited
+                        accumulated = accumulated + HealthData(nights = result.data)
+                        withContext(Dispatchers.IO) { Archive.merge(context, accumulated) }
+                        if (year == today.year) {
+                            DataCache.save(context, accumulated)
+                            updateAllWidgets(context)
+                        }
+                        state = UiState.Ready(accumulated, REQUESTED_PERMISSIONS - granted, warning())
+                        // Inutile de continuer à taper Health Connect si le rate
+                        // limiter a déjà dit stop : on garde ce qui est lu et on laisse
+                        // l'utilisateur relancer à la prochaine ouverture.
+                        if (result.rateLimited) {
+                            consecutiveTimeouts =
+                                if (result.data.isEmpty()) consecutiveTimeouts + 1 else 0
+                            // Un timeout ponctuel n'est pas une raison de tout arrêter :
+                            // on continue vers des semaines plus anciennes (elles peuvent
+                            // être rapides). Mais si ça rame trois semaines de suite, on
+                            // abandonne pour ne pas laisser l'écran planter indéfiniment.
+                            if (consecutiveTimeouts >= 3) {
+                                Log.w("SleepTrack-HC", "Trop de timeouts sommeil consécutifs, on s'arrête")
+                                break
+                            }
+                            continue
+                        }
+                    }
+                    fetchedYears.value = fetchedYears.value + year
+                }
+            }
+        } catch (e: CancellationException) {
+            // L'effet a été annulé (changement d'année/écran pendant le chargement) :
+            // on ne doit surtout pas continuer à écrire dans `state` après coup, sous
+            // peine de "The coroutine scope left the composition". Une CancellationException
+            // ici est forcément une vraie annulation Compose : chaque appel Health
+            // Connect a désormais son propre withTimeout local, donc plus de
+            // TimeoutCancellationException à distinguer à ce niveau.
+            throw e
         } catch (e: Exception) {
-            UiState.Error(e.message ?: e.javaClass.simpleName)
+            // Un vrai imprévu (le rate limit / timeout ne devraient plus arriver
+            // jusqu'ici : chaque lecture Health Connect les gère déjà en interne, page
+            // par page ou mois par mois, et renvoie du partiel plutôt que de jeter).
+            // S'il y a quand même quelque chose en archive, on préfère l'afficher avec
+            // un avertissement plutôt que de bloquer tout l'écran.
+            val isRateLimit = e.message?.contains("rate limit", ignoreCase = true) == true ||
+                e.message?.contains("quota", ignoreCase = true) == true
+            val message = if (isRateLimit) {
+                "Health Connect a limité les requêtes plus longtemps que prévu. Attends un peu avant de réessayer."
+            } else {
+                e.message ?: e.javaClass.simpleName
+            }
+            state = if (archived.isEmpty()) {
+                UiState.Error(message)
+            } else {
+                // On ne connaît pas forcément `granted` ici si le souci vient de la
+                // vérif de permission elle-même : REQUESTED_PERMISSIONS par défaut,
+                // c'est juste utilisé pour un badge, pas critique.
+                UiState.Ready(archived, REQUESTED_PERMISSIONS, warning = message)
+            }
         }
     }
 
@@ -134,15 +302,7 @@ private fun SleepApp() {
         when {
             settings -> SettingsScreen(
                 data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
-                onBack = {
-                    settings = false
-                    visibleMetrics = Prefs.visibleMetrics(context)
-                    display = Prefs.display(context)
-                    if (metric !in visibleMetrics) metric = Metric.SLEEP
-                    updateAllWidgets(context)
-                    // Un import a pu enrichir l'archive : on relit.
-                    refreshKey++
-                },
+                onBack = closeSettings,
             )
             else -> when (val s = state) {
                 UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
@@ -183,6 +343,8 @@ private fun SleepApp() {
                     data = s.data,
                     missing = s.missing,
                     demo = demo,
+                    warning = if (Prefs.hideSyncErrors(context)) null else s.warning,
+                    onRetry = { refreshKey++ },
                     onYear = { year = it },
                     onMetric = {
                         metric = it
@@ -206,6 +368,8 @@ private fun MainScreen(
     data: HealthData,
     missing: Set<String>,
     demo: Boolean,
+    warning: String? = null,
+    onRetry: () -> Unit = {},
     onYear: (Int) -> Unit,
     onMetric: (Metric) -> Unit,
     onRequestPermissions: () -> Unit,
@@ -253,6 +417,16 @@ private fun MainScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Mode démo (données fictives)", color = Palette.levels[2], fontSize = 13.sp, modifier = Modifier.weight(1f))
                 TextButton(onClick = onExitDemo) { Text("Quitter", color = Palette.text) }
+            }
+        }
+
+        if (warning != null) {
+            // Rate limit Health Connect ou autre pépin en cours de lecture : on le
+            // signale sans bloquer l'écran, les données déjà là (archive + ce qui a
+            // pu être lu) restent affichées en dessous.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(warning, color = Palette.levels[2], fontSize = 13.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = onRetry) { Text("Réessayer", color = Palette.text) }
             }
         }
 
@@ -551,6 +725,19 @@ private fun Message(title: String, body: String, action: String, onAction: () ->
 /** Marqueur : la demande d'autorisation en cours vient du bouton d'exemple. */
 private const val SAMPLE = "sample"
 
+// `runCatching` attrape aussi CancellationException, ce qui casse l'annulation structurée :
+// si l'écran est quitté pendant un export/import, la coroutine annulée continuerait alors à
+// écrire dans un état Compose déjà sorti de la composition ("The coroutine scope left the
+// composition"). Ce remplacement relance l'annulation au lieu de l'avaler.
+private inline fun <T> catchingExceptCancellation(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
 @Composable
 private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -563,6 +750,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     var visible by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
     var widgetMetric by remember { mutableStateOf(Prefs.widgetMetric(context)) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
+    var hideSyncErrors by remember { mutableStateOf(Prefs.hideSyncErrors(context)) }
     var backupStatus by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -575,7 +763,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            backupStatus = runCatching {
+            backupStatus = catchingExceptCancellation {
                 withContext(Dispatchers.IO) {
                     // On verse d'abord l'année affichée dans l'archive : l'export porte
                     // alors tout ce que l'app connaît, pas seulement l'écran ouvert.
@@ -593,7 +781,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            backupStatus = runCatching {
+            backupStatus = catchingExceptCancellation {
                 withContext(Dispatchers.IO) {
                     exportCsv(context, uri, Archive.merge(context, data))
                 }
@@ -609,7 +797,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            backupStatus = runCatching {
+            backupStatus = catchingExceptCancellation {
                 withContext(Dispatchers.IO) {
                     val imported = importBackup(context, uri)
                     Archive.merge(context, imported)
@@ -866,6 +1054,14 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 ) { on ->
                     Prefs.setFlag(context, Prefs.SHOW_NOTES, on)
                     display = Prefs.display(context)
+                }
+                SettingSwitch(
+                    title = "Masquer les messages d'erreur de synchronisation",
+                    subtitle = "Cache les bandeaux « Health Connect a limité… » lors des lectures",
+                    checked = hideSyncErrors,
+                ) { on ->
+                    Prefs.setFlag(context, Prefs.HIDE_SYNC_ERRORS, on)
+                    hideSyncErrors = on
                 }
                 SettingSwitch(
                     title = "Commentaires du modèle local",

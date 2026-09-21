@@ -15,6 +15,7 @@ import androidx.health.connect.client.HealthConnectClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
@@ -206,13 +207,15 @@ suspend fun freshData(context: Context): HealthData {
     val cached = DataCache.load(context)
     if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) return cached
     return runCatching {
-        val client = HealthConnectClient.getOrCreate(context)
-        val granted = client.permissionController.getGrantedPermissions()
-        if (PERMISSION_READ_BACKGROUND !in granted) return cached
-        val today = LocalDate.now()
-        val fresh = loadHealthData(client, granted, today.minusDays(21), today)
-        val merged = cached + fresh
-        DataCache.save(context, merged)
-        merged
+        withTimeout(90_000) {
+            val client = HealthConnectClient.getOrCreate(context)
+            val granted = client.permissionController.getGrantedPermissions()
+            if (PERMISSION_READ_BACKGROUND !in granted) return@withTimeout cached
+            val today = LocalDate.now()
+            val fresh = loadHealthData(client, granted, today.minusDays(21), today)
+            val merged = cached + fresh.data
+            DataCache.save(context, merged)
+            merged
+        }
     }.getOrDefault(cached)
 }
