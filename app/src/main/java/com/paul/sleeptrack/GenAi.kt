@@ -9,7 +9,6 @@ import com.google.mlkit.genai.prompt.SystemInstruction
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import com.google.mlkit.genai.prompt.generationConfig
-import org.json.JSONObject
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
@@ -120,29 +119,6 @@ class Nano : AutoCloseable {
 
     suspend fun comment(metric: Metric, data: HealthData, goalMinutes: Int, year: Int): String? =
         generate(COMMENT_INSTRUCTION, metricFacts(metric, data, goalMinutes, year), maxTokens = 160, temp = 0.3f)
-
-    // ------------------------------------------------------ Question de grille
-
-    /**
-     * Traduit une question en français en une plage à surligner. Le modèle ne lit aucune
-     * donnée de santé ici : il ne reçoit que la date du jour et les années disponibles, et
-     * ne renvoie que des dates. Une réponse mal formée devient null, jamais un à-peu-près.
-     */
-    suspend fun askGrid(question: String, years: List<Int>, today: LocalDate = LocalDate.now()): GridQuery? {
-        if (question.isBlank() || years.isEmpty()) return null
-        val prompt = buildString {
-            appendLine("Aujourd'hui : $today (${dayName(today.dayOfWeek)}).")
-            appendLine("Années disponibles : ${years.sorted().joinToString(", ")}.")
-            appendLine("Question : ${question.trim().take(200)}")
-        }
-        val raw = generate(ASK_INSTRUCTION, prompt, maxTokens = 120, temp = 0.1f) ?: return null
-        return parseGridQuery(raw, years)
-    }
-}
-
-/** Une métrique et une plage de dates : de quoi piloter la grille, rien de plus. */
-data class GridQuery(val metric: Metric, val from: LocalDate, val to: LocalDate) {
-    val range: ClosedRange<LocalDate> get() = from..to
 }
 
 // ------------------------------------------------------------------- Consignes
@@ -157,14 +133,6 @@ private const val COMMENT_INSTRUCTION =
         "texte. Aucun conseil médical, aucun diagnostic, aucune recommandation. Pas de " +
         "liste, pas de titre, pas d'emoji. Dis ce que le croisement des chiffres montre, " +
         "ne les répète pas un par un."
-
-private const val ASK_INSTRUCTION =
-    "Tu traduis une question en français en un objet JSON, et rien d'autre. Réponds " +
-        "uniquement par le JSON, sans phrase autour et sans bloc de code. Format exact : " +
-        "{\"metric\":\"SLEEP\",\"from\":\"AAAA-MM-JJ\",\"to\":\"AAAA-MM-JJ\"}. metric vaut " +
-        "SLEEP pour le sommeil, STEPS pour les pas, HEART pour le cœur au repos, WEIGHT " +
-        "pour le poids, SCREEN pour le temps d'écran. from et to sont des dates réelles, from avant ou égale à to. Tu ne " +
-        "connais aucune donnée de santé : tu ne fais que convertir une période en dates."
 
 // ---------------------------------------------------------------------- Faits
 
@@ -220,32 +188,3 @@ fun metricFacts(metric: Metric, data: HealthData, goalMinutes: Int, year: Int): 
 }
 
 private fun dayName(day: DayOfWeek): String = day.getDisplayName(TextStyle.FULL, Locale.FRENCH)
-
-// -------------------------------------------------------------------- Parsing
-
-/**
- * Lit le JSON renvoyé par le modèle. Tout ce qui n'est pas exactement une métrique connue
- * et une plage de dates cohérente est rejeté : mieux vaut « je n'ai pas compris » qu'une
- * grille qui saute au hasard.
- *
- * Volontairement écrit à la main plutôt qu'avec le Structured Output (`@Generable`) : ce
- * dernier est en Alpha et impose le plugin KSP 2.3.6, donc Kotlin 2.3 ; le projet est en
- * Kotlin 2.2. À rebasculer si le projet monte de version.
- */
-internal fun parseGridQuery(raw: String, years: List<Int>): GridQuery? {
-    val start = raw.indexOf('{')
-    val end = raw.lastIndexOf('}')
-    if (start < 0 || end <= start) return null
-
-    return runCatching {
-        val json = JSONObject(raw.substring(start, end + 1))
-        val metric = Metric.entries.firstOrNull { it.name == json.optString("metric").uppercase() }
-            ?: return null
-        val from = LocalDate.parse(json.optString("from"))
-        val to = LocalDate.parse(json.optString("to"))
-        if (from.isAfter(to)) return null
-        // Une plage qui ne touche aucune année connue ne surlignerait rien.
-        if (years.none { it in from.year..to.year }) return null
-        GridQuery(metric, from, to)
-    }.getOrNull()
-}
