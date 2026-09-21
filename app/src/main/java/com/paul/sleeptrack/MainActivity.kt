@@ -131,8 +131,6 @@ private fun SleepApp() {
             .fillMaxSize()
             .background(Palette.bg)
             .systemBarsPadding()
-            // Sans ça, le clavier recouvre la barre de question.
-            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -219,12 +217,6 @@ private fun MainScreen(
 ) {
     val context = LocalContext.current
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
-    // La période mise en avant par une question posée à la grille.
-    var asked by remember { mutableStateOf<GridQuery?>(null) }
-    // Le surlignage ne vaut que pour la métrique et l'année qu'il décrit. En le dérivant
-    // plutôt qu'en l'effaçant, changer d'onglet ou d'année à la main le fait disparaître
-    // tout seul — et la réponse à une question survit au changement qu'elle provoque.
-    val highlight = asked?.takeIf { it.metric == metric && year in it.from.year..it.to.year }
     val nano = rememberNano()
     val currentYear = LocalDate.now().year
     val scale = remember(metric, data) { scaleFor(metric, data) }
@@ -278,43 +270,12 @@ private fun MainScreen(
                     onSelect = { selected = it },
                     colorAt = { day -> series[day]?.let(scale::colorOf) },
                     minPitch = minPitch,
-                    highlight = highlight?.range,
                 )
-                highlight?.let { query ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            highlightLabel(query),
-                            color = Palette.text,
-                            fontSize = 13.sp,
-                            modifier = Modifier.weight(1f),
-                        )
-                        TextButton(onClick = { asked = null }) {
-                            Text("Tout revoir", color = Palette.muted, fontSize = 13.sp)
-                        }
-                    }
-                }
                 if (display.legend) Legend(metric, scale)
             }
         }
 
         selected?.let { day -> DayDetail(day, data, visibleMetrics) }
-
-        // Gemini Nano, en local. Tout ce bloc disparaît sur un appareil que le Prompt API
-        // ne couvre pas : l'app redevient alors exactement celle d'avant.
-        if (display.ai && nano.ready) {
-            Panel {
-                NanoAsk(nano, availableYears()) { query ->
-                    // Si la métrique demandée est masquée dans les réglages, on garde
-                    // l'onglet ouvert : la période reste celle qu'on a demandée, et le
-                    // surlignage s'applique quand même au lieu de ne rien faire.
-                    val target = if (query.metric in visibleMetrics) query.metric else metric
-                    if (target != metric) onMetric(target)
-                    if (query.from.year != year) onYear(query.from.year)
-                    asked = query.copy(metric = target)
-                    selected = null
-                }
-            }
-        }
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
@@ -827,7 +788,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 SettingSwitch(
                     title = "Commentaires du modèle local",
                     subtitle = if (nano.ready) {
-                        "Deux phrases rédigées sur le téléphone, et la barre de question"
+                        "Deux phrases rédigées sur le téléphone, sous les statistiques"
                     } else {
                         "Ce téléphone ne fait pas tourner le modèle : sans effet ici"
                     },

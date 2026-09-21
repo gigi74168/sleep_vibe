@@ -8,12 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,17 +23,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 
 /**
- * Les deux panneaux qui parlent à Gemini Nano, et l'état partagé qui les alimente.
+ * Le panneau qui parle à Gemini Nano, et l'état qui l'alimente.
  *
- * Tout part de [NanoStatus] : tant qu'il ne vaut pas [NanoStatus.READY], aucun des deux
- * panneaux ne s'affiche. Sur un appareil non supporté, l'app est exactement celle d'avant,
+ * Tout part de [NanoStatus] : tant qu'il ne vaut pas [NanoStatus.READY], le commentaire ne
+ * s'affiche pas. Sur un appareil non supporté, l'app est exactement celle d'avant,
  * sans bouton grisé ni message d'erreur — le Prompt API ne couvre pas tous les téléphones,
  * ce n'est pas une panne qu'il faut annoncer.
  */
@@ -81,7 +75,7 @@ fun NanoDownloadPanel(state: NanoState) {
         Text(
             "Ton téléphone sait faire tourner un modèle de langage en local. Le " +
                 "télécharger (plusieurs centaines de Mo, une seule fois) permet à l'app de " +
-                "rédiger ses commentaires et de répondre à tes questions. Tes données de " +
+                "rédiger ses commentaires sous tes statistiques. Tes données de " +
                 "santé, elles, ne quittent toujours pas le téléphone.",
             color = Palette.muted,
             fontSize = 13.sp,
@@ -167,89 +161,3 @@ fun NanoComment(state: NanoState, metric: Metric, data: HealthData, goalMinutes:
         }
     }
 }
-
-// ------------------------------------------------------------------- Question
-
-/**
- * « Pose une question à ta grille ». Le modèle ne voit aucune donnée de santé : il reçoit
- * la date du jour et les années disponibles, et renvoie une métrique et une plage de dates
- * que l'app applique elle-même. Il ne peut donc pas se tromper sur un chiffre — au pire il
- * se trompe de période, ce qui se voit immédiatement sur la grille.
- */
-@Composable
-fun NanoAsk(state: NanoState, years: List<Int>, onResult: (GridQuery) -> Unit) {
-    var question by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    fun submit() {
-        if (question.isBlank() || running) return
-        running = true
-        failed = false
-        scope.launch {
-            val result = state.nano.askGrid(question, years)
-            running = false
-            if (result == null) failed = true else onResult(result)
-        }
-    }
-
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Poser une question", color = Palette.text, fontWeight = FontWeight.SemiBold)
-        OutlinedTextField(
-            value = question,
-            onValueChange = {
-                question = it
-                failed = false
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("mes nuits de janvier dernier", color = Palette.muted, fontSize = 14.sp) },
-            singleLine = true,
-            enabled = !running,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { submit() }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Palette.text,
-                unfocusedTextColor = Palette.text,
-                focusedBorderColor = Palette.levels.last(),
-                unfocusedBorderColor = Palette.empty,
-                cursorColor = Palette.levels.last(),
-            ),
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { submit() }, enabled = question.isNotBlank() && !running) {
-                Text("Chercher", color = if (question.isBlank()) Palette.muted else Palette.levels.last())
-            }
-            if (running) {
-                Spacer(Modifier.width(6.dp))
-                CircularProgressIndicator(Modifier.size(14.dp), color = Palette.muted, strokeWidth = 2.dp)
-            }
-        }
-        if (failed) {
-            Text(
-                "Je n'ai pas su transformer ça en période. Essaie avec un mois ou une " +
-                    "saison : « mon sommeil en février », « mes pas cet été ».",
-                color = Palette.levels[1],
-                fontSize = 13.sp,
-            )
-        }
-        Text(
-            "La question sert seulement à choisir une métrique et une période : les " +
-                "chiffres affichés restent ceux de tes données.",
-            color = Palette.muted.copy(alpha = 0.7f),
-            fontSize = 11.sp,
-        )
-    }
-}
-
-/** Phrase qui accompagne la grille quand une question l'a filtrée. */
-fun highlightLabel(query: GridQuery): String {
-    val from = query.from.format(Palette.longDate)
-    val to = query.to.format(Palette.longDate)
-    val period = if (query.from == query.to) from else "du $from au $to"
-    return "${query.metric.detailLabel} · $period"
-}
-
-/** Les années que l'app peut afficher, pour borner les réponses du modèle. */
-fun availableYears(today: LocalDate = LocalDate.now()): List<Int> =
-    ((today.year - 4)..today.year).toList()

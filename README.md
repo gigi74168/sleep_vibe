@@ -34,8 +34,8 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   et la nuit qui la suit, avec la comparaison « après 8 000 pas ou plus » contre « après une journée calme ».
 - **Rappels** (optionnels) : rappel du soir quand la moyenne des 7 derniers jours passe sous l'objectif,
   et résumé du dimanche comparant la semaine à la précédente. Calculés sur le téléphone.
-- **Commentaires hors ligne** (appareils compatibles) : deux phrases qui croisent tes chiffres,
-  et une barre pour interroger la grille en français (« mes nuits de janvier »). Tout est produit par [Gemini Nano](https://developers.google.com/ml-kit/genai)
+- **Commentaires hors ligne** (appareils compatibles) : deux phrases qui croisent tes chiffres.
+  Elles sont produites par [Gemini Nano](https://developers.google.com/ml-kit/genai)
   sur le téléphone, à partir des statistiques que l'app a déjà calculées — voir
   [Commentaires hors ligne](#commentaires-hors-ligne).
 - **Widget** d'écran d'accueil : les dernières semaines de la métrique choisie dans les réglages,
@@ -67,25 +67,21 @@ de l'année affichée (du plus léger au plus lourd), avec les seuils réels en 
 
 ## Commentaires hors ligne
 
-Deux fonctions s'appuient sur les [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai)
+Une fonction s'appuie sur les [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai)
 (Prompt API, `com.google.mlkit:genai-prompt`), qui font tourner Gemini Nano sur l'appareil :
 
 | Fonction | Où |
 | --- | --- |
 | « Ce qui ressort » : deux phrases qui croisent moyenne, séries, semaine type et corrélation | sous les panneaux de la métrique affichée |
-| « Poser une question » : une période en français, la grille saute dessus et estompe le reste | sous la grille |
 
 **Le modèle rédige, il ne compte pas.** Tous les chiffres qu'il reçoit sont déjà calculés par
-l'app, et la consigne lui interdit d'en inventer ou d'en recalculer. La barre de question va
-plus loin : le modèle n'y voit aucune donnée de santé, seulement la date du jour et les années
-disponibles, et ne renvoie qu'une métrique et deux dates que l'app applique elle-même. Une
-réponse mal formée est rejetée plutôt qu'interprétée au jugé.
+l'app, et la consigne lui interdit d'en inventer ou d'en recalculer.
 
 ### Ce qui ne marche pas, et pourquoi
 
 - **Tous les téléphones ne sont pas concernés.** Le Prompt API couvre une liste plus courte que
   les autres APIs ML Kit, et exclut les appareils au bootloader déverrouillé. Quand le modèle
-  n'est pas disponible, ces deux fonctions disparaissent : l'app est alors exactement celle
+  n'est pas disponible, le commentaire disparaît : l'app est alors exactement celle
   d'avant, sans bouton grisé ni message d'erreur. Liste à jour :
   [device support](https://developers.google.com/ml-kit/genai#device-support).
 - **Pas d'inférence en arrière-plan.** AICore la refuse (`BACKGROUND_USE_BLOCKED`), ce qui exclut
@@ -93,9 +89,6 @@ réponse mal formée est rejetée plutôt qu'interprétée au jugé.
 - **APIs en Beta** : pas de SLA, et les signatures peuvent changer. Les
   [ML Kit GenAI API Additional Terms](https://developers.google.com/ml-kit/genai-terms)
   s'appliquent. Aucun coût : l'inférence tourne sur l'appareil, il n'y a pas d'endpoint facturé.
-- **Pas de Structured Output.** La réponse de la barre de question est du JSON lu à la main plutôt
-  qu'un objet `@Generable` : ce dernier est en Alpha et réclame le plugin KSP 2.3.6, donc Kotlin
-  2.3, alors que le projet est en Kotlin 2.2. À rebasculer si le projet monte de version.
 - Le tout se coupe dans **Réglages → Affichage → « Commentaires du modèle local »**.
 
 ## Format de sauvegarde

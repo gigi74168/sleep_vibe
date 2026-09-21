@@ -63,10 +63,6 @@ private val DAY_LABELS = listOf("Lun", "", "Mer", "", "Ven", "", "Dim")
  * La grille de l'année. Par défaut elle tient dans la largeur ; si [minPitch] demande des
  * cases plus grandes que cet ajustement, la grille déborde et défile horizontalement, la
  * colonne des jours restant en place.
- *
- * [highlight] met une période en avant en estompant tout ce qui l'entoure, plutôt qu'en
- * entourant les jours retenus : sur des cases de quelques pixels, un cadre se verrait
- * moins bien que le contraste.
  */
 @Composable
 fun YearHeatmap(
@@ -75,7 +71,6 @@ fun YearHeatmap(
     onSelect: (LocalDate?) -> Unit,
     colorAt: (LocalDate) -> Color?,
     minPitch: Dp = 0.dp,
-    highlight: ClosedRange<LocalDate>? = null,
 ) {
     val gridStart = LocalDate.of(year, 1, 1).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val weeks = (ChronoUnit.DAYS.between(gridStart, LocalDate.of(year, 12, 31)) / 7 + 1).toInt()
@@ -147,22 +142,12 @@ fun YearHeatmap(
                             val day = gridStart.plusDays(col * 7L + row)
                             if (day.year != year) continue
                             val topLeft = Offset(col * p + inset, row * p + inset)
-                            val dimmed = highlight != null && day !in highlight
-                            drawRoundRect(
-                                currentColorAt.value(day) ?: Palette.empty,
-                                topLeft,
-                                Size(s, s),
-                                radius,
-                                alpha = if (dimmed) 0.18f else 1f,
-                            )
-                            // Repère discret sur aujourd'hui, pour savoir où on en est dans
-                            // l'année. Estompé comme sa case quand il tombe hors période,
-                            // sans quoi il ressortirait plus que les jours mis en avant.
+                            drawRoundRect(currentColorAt.value(day) ?: Palette.empty, topLeft, Size(s, s), radius)
+                            // Repère discret sur aujourd'hui, pour savoir où on en est dans l'année.
                             if (day == today && day != selected) {
                                 drawRoundRect(
                                     Palette.muted, topLeft, Size(s, s), radius,
                                     style = Stroke(1.5.dp.toPx()),
-                                    alpha = if (dimmed) 0.18f else 1f,
                                 )
                             }
                             if (day == selected) {
