@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -68,6 +69,9 @@ private fun SleepApp() {
     var visibleMetrics by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
     var demo by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
+    var chat by remember { mutableStateOf(false) }
+    // Hissé ici pour que la discussion puisse ramener la page en bas à chaque réponse.
+    val pageScroll = rememberScrollState()
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
@@ -128,10 +132,24 @@ private fun SleepApp() {
             .fillMaxSize()
             .background(Palette.bg)
             .systemBarsPadding()
-            .verticalScroll(rememberScrollState())
+            // Sans ça, le clavier recouvre le champ de saisie de la discussion.
+            .imePadding()
+            .verticalScroll(pageScroll)
             .padding(16.dp)
     ) {
+        // Le geste retour ferme la discussion au lieu de quitter l'app.
+        BackHandler(enabled = chat) { chat = false }
+
         when {
+            chat -> ChatScreen(
+                data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
+                visible = visibleMetrics,
+                goalMinutes = display.goalMinutes,
+                year = year,
+                demo = demo,
+                pageScroll = pageScroll,
+                onBack = { chat = false },
+            )
             settings -> SettingsScreen(
                 data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
                 onBack = {
@@ -191,6 +209,7 @@ private fun SleepApp() {
                     onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
                     onExitDemo = { demo = false },
                     onSettings = { settings = true },
+                    onChat = { chat = true },
                 )
             }
         }
@@ -211,6 +230,7 @@ private fun MainScreen(
     onRequestPermissions: () -> Unit,
     onExitDemo: () -> Unit,
     onSettings: () -> Unit,
+    onChat: () -> Unit,
 ) {
     val context = LocalContext.current
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
@@ -307,6 +327,27 @@ private fun MainScreen(
                     if (query.from.year != year) onYear(query.from.year)
                     asked = query.copy(metric = target)
                     selected = null
+                }
+            }
+        }
+        if (display.ai) {
+            Panel {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onChat)
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Discuter avec tes données", color = Palette.text, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Questions et pistes personnalisées, rédigées sur le téléphone",
+                            color = Palette.muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Text("›", color = Palette.muted, fontSize = 26.sp)
                 }
             }
         }
@@ -870,9 +911,9 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 SettingSwitch(
                     title = "Commentaires du modèle local",
                     subtitle = if (nano.ready) {
-                        "Deux phrases rédigées sur le téléphone, et la barre de question"
+                        "Commentaires, barre de question et discussion, sur le téléphone"
                     } else {
-                        "Ce téléphone ne fait pas tourner le modèle : sans effet ici"
+                        "Ce téléphone ne fait pas tourner le modèle ; masque aussi l'entrée « Discuter »"
                     },
                     checked = display.ai,
                 ) { on ->
