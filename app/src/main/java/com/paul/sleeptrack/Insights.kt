@@ -27,6 +27,7 @@ fun targetFor(metric: Metric, goalMinutes: Int): Target? = when (metric) {
     ) { it >= goalMinutes }
     Metric.STEPS -> Target("journées à 10 000 pas ou plus") { it >= 10_000 }
     Metric.HEART -> Target("journées à 58 bpm ou moins") { it <= 58 }
+    Metric.SCREEN -> Target("journées sous 3h d'écran") { it < 180 }
     // Le poids n'a pas de « bon » côté : une série n'y voudrait rien dire.
     Metric.WEIGHT -> null
 }
@@ -200,6 +201,8 @@ private fun weekSentence(
         Metric.STEPS -> "Tu marches le plus le $high ($highText) et le moins le $low ($lowText)."
         Metric.HEART -> "Ton cœur au repos est au plus bas le $low ($lowText) et au plus haut " +
             "le $high ($highText)."
+        Metric.SCREEN -> "Tu passes le plus de temps sur ton écran le $high ($highText), le moins " +
+            "le $low ($lowText)."
         Metric.WEIGHT -> "Tu es au plus léger le $low ($lowText) et au plus lourd le $high ($highText)."
     }
 }
@@ -213,4 +216,5 @@ private fun compactValue(metric: Metric, value: Double): String = when (metric) 
     Metric.STEPS -> if (value >= 1_000) "%.1fk".format(Locale.FRENCH, value / 1_000) else "%.0f".format(value)
     Metric.HEART -> "%.0f".format(value)
     Metric.WEIGHT -> "%.1f".format(Locale.FRENCH, value)
+    Metric.SCREEN -> formatDuration(Duration.ofMinutes(value.toLong()))
 }

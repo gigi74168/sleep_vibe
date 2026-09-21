@@ -143,6 +143,7 @@ object DataCache {
         root.put("steps", jsonOf(data.steps.filterKeys { it > floor }.mapValues { it.value.toDouble() }))
         root.put("heart", jsonOf(data.heart.filterKeys { it > floor }))
         root.put("weight", jsonOf(data.weight.filterKeys { it > floor }))
+        root.put("screen", jsonOf(data.screen.filterKeys { it > floor }))
         Prefs.of(context).edit().putString(KEY, root.toString()).apply()
     }
 
@@ -155,6 +156,7 @@ object DataCache {
                 steps = readMap(root, "steps").mapValues { it.value.toLong() },
                 heart = readMap(root, "heart"),
                 weight = readMap(root, "weight"),
+                screen = readMap(root, "screen"),
             )
         }.getOrDefault(HealthData())
     }
