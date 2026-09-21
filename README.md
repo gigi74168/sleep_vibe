@@ -17,7 +17,7 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 
 ## Fonctionnalités
 
-- Grille annuelle pour quatre métriques — sommeil, pas, cœur au repos, poids — navigation par année, détail d'une journée au toucher.
+- Grille annuelle pour cinq métriques — sommeil, pas, cœur au repos, poids, temps d'écran — navigation par année, détail d'une journée au toucher.
 - Sommeil : sessions Health Connect, stades « éveillé » déduits, chevauchements entre montre et téléphone fusionnés, nuit rattachée à la date du réveil.
 - Pas : agrégation quotidienne Health Connect. Cœur au repos et poids : moyenne des relevés du jour.
 - Statistiques par métrique : moyenne, 7 derniers jours, record, tendance sur 30 jours.
@@ -25,6 +25,11 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   10 000 pas, 58 bpm), série en cours et record de l'année. Un jour sans donnée coupe la série.
 - **Semaine type** : moyenne de chaque jour de la semaine, avec le jour le plus haut et le plus bas.
   Les barres se comparent entre elles et non à zéro, sans quoi l'écart réel serait invisible.
+- **Temps d'écran** : cinquième grille, lue dans les statistiques d'utilisation d'Android (Health
+  Connect n'en a pas). Compte le temps où l'écran est allumé **et** déverrouillé — un peu plus que
+  Bien-être numérique, qui ne compte pas l'écran d'accueil. Android ne garde qu'une dizaine de jours
+  d'événements : l'historique commence là et s'allonge dans l'archive à chaque ouverture de l'app.
+  La journée en cours n'apparaît qu'une fois terminée.
 - **Activité et sommeil** : nuage de points et coefficient de corrélation entre les pas d'une journée
   et la nuit qui la suit, avec la comparaison « après 8 000 pas ou plus » contre « après une journée calme ».
 - **Rappels** (optionnels) : rappel du soir quand la moyenne des 7 derniers jours passe sous l'objectif,
@@ -56,6 +61,7 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 | **Sommeil** | < 5h | 5-6h | 6-7h | 7-8h | 8h+ |
 | **Pas** | < 3k | 3-6k | 6-8k | 8-10k | 10k+ |
 | **Cœur au repos** | 70+ | 64-70 | 58-64 | 52-58 | < 52 |
+| **Temps d'écran** | 5h+ | 4-5h | 3-4h | 2-3h | < 2h |
 
 Le poids n'a pas de « bon » côté : il reçoit un dégradé bleu neutre, calé sur les quintiles
 de l'année affichée (du plus léger au plus lourd), avec les seuils réels en légende.
@@ -107,7 +113,8 @@ réponse mal formée est rejetée plutôt qu'interprétée au jugé.
   "format": 1,
   "exportedAt": "2026-09-18",
   "days": [
-    { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123, "restingHeartRate": 56.2, "weightKg": 72.4 }
+    { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123, "restingHeartRate": 56.2, "weightKg": 72.4,
+      "screenMinutes": 214 }
   ]
 }
 ```
@@ -160,6 +167,8 @@ sans « arrière-plan », le widget et les rappels se contentent des dernières 
 - `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND`
 - `android.permission.POST_NOTIFICATIONS` (rappels, demandée seulement si tu les actives)
 - `android.permission.RECEIVE_BOOT_COMPLETED` (replacer les rappels après un redémarrage)
+- `android.permission.PACKAGE_USAGE_STATS` (temps d'écran) : autorisation spéciale, à accorder
+  soi-même dans Réglages › Accès aux données d'utilisation ; l'app ouvre l'écran au bon endroit
 
 ## Limites
 

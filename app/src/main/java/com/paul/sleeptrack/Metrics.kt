@@ -5,19 +5,22 @@ import java.time.Duration
 import java.time.LocalDate
 import java.util.Locale
 
-/** Les quatre séries quotidiennes lues dans Health Connect. */
+/** Les séries quotidiennes : quatre lues dans Health Connect, le temps d'écran lu dans Android. */
 data class HealthData(
     val nights: Map<LocalDate, Duration> = emptyMap(),
     val steps: Map<LocalDate, Long> = emptyMap(),
     val heart: Map<LocalDate, Double> = emptyMap(),
     val weight: Map<LocalDate, Double> = emptyMap(),
+    /** Minutes d'écran allumé et déverrouillé. */
+    val screen: Map<LocalDate, Double> = emptyMap(),
 ) {
-    /** Série normalisée : minutes, pas, bpm ou kg selon la métrique. */
+    /** Série normalisée : minutes, pas, bpm, kg ou minutes d'écran selon la métrique. */
     fun series(metric: Metric): Map<LocalDate, Double> = when (metric) {
         Metric.SLEEP -> nights.mapValues { it.value.toMinutes().toDouble() }
         Metric.STEPS -> steps.mapValues { it.value.toDouble() }
         Metric.HEART -> heart
         Metric.WEIGHT -> weight
+        Metric.SCREEN -> screen
     }
 
     fun isEmpty(): Boolean = Metric.entries.all { series(it).isEmpty() }
@@ -27,6 +30,7 @@ data class HealthData(
         steps.filterKeys { it.year == year },
         heart.filterKeys { it.year == year },
         weight.filterKeys { it.year == year },
+        screen.filterKeys { it.year == year },
     )
 
     operator fun plus(other: HealthData) = HealthData(
@@ -34,6 +38,7 @@ data class HealthData(
         steps + other.steps,
         heart + other.heart,
         weight + other.weight,
+        screen + other.screen,
     )
 }
 
@@ -42,6 +47,7 @@ enum class Metric(val label: String, val detailLabel: String, val canHide: Boole
     STEPS("Pas", "Pas"),
     HEART("Cœur", "Cœur au repos"),
     WEIGHT("Poids", "Poids"),
+    SCREEN("Écran", "Temps d'écran"),
 }
 
 fun Metric.format(value: Double): String = when (this) {
@@ -49,6 +55,7 @@ fun Metric.format(value: Double): String = when (this) {
     Metric.STEPS -> formatSteps(value.toLong())
     Metric.HEART -> "%.0f bpm".format(value)
     Metric.WEIGHT -> "%.1f kg".format(Locale.FRENCH, value)
+    Metric.SCREEN -> formatDuration(Duration.ofMinutes(value.toLong()))
 }
 
 /** Unité employée par une somme de valeurs ; « 312 nuits », « 1 jour ». */
@@ -90,6 +97,11 @@ fun scaleFor(metric: Metric, data: HealthData): Scale = when (metric) {
         listOf("70+", "64-70", "58-64", "52-58", "<52"),
     )
     Metric.WEIGHT -> weightScale(data.weight.values)
+    // Moins il y en a, mieux c'est : l'échelle est inversée, comme celle du cœur.
+    Metric.SCREEN -> Scale(
+        listOf(120.0, 180.0, 240.0, 300.0), true, Palette.levels,
+        listOf("5h+", "4-5h", "3-4h", "2-3h", "<2h"),
+    )
 }
 
 private fun weightScale(values: Collection<Double>): Scale {
@@ -156,6 +168,18 @@ fun statTiles(metric: Metric, data: HealthData, scale: Scale): List<StatTile> {
             tile("Plus bas", series.values.min()),
             trendTile(metric, series, "Tendance 30j", lowerIsBetter = true),
         )
+        Metric.SCREEN -> {
+            val light = series.values.count { it < 180 }
+            listOf(
+                tile("Moyenne", average),
+                recentTile,
+                tile("Plus sobre", series.values.min()),
+                StatTile(
+                    "Jours < 3h", "$light",
+                    if (light > 0) Palette.levels.last() else Palette.levels[0],
+                ),
+            )
+        }
         Metric.WEIGHT -> {
             val latest = series.maxByOrNull { it.key }!!.value
             listOf(

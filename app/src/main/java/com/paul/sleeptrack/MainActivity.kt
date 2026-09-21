@@ -84,8 +84,14 @@ private fun SleepApp() {
             return@LaunchedEffect
         }
         // Ce que l'app a déjà lu ou importé : de quoi afficher une année même si Health
-        // Connect ne la restitue plus, ou pas encore.
-        val archived = withContext(Dispatchers.IO) { Archive.load(context).filterYear(year) }
+        // Connect ne la restitue plus, ou pas encore. Le temps d'écran y est versé d'abord :
+        // Android n'en garde qu'une dizaine de jours, l'archive fait le reste.
+        val archived = withContext(Dispatchers.IO) {
+            if (Metric.SCREEN in visibleMetrics) {
+                Archive.merge(context, HealthData(screen = readRecentScreenTime(context)))
+            }
+            Archive.load(context).filterYear(year)
+        }
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
             state = if (archived.isEmpty()) UiState.NotInstalled else UiState.Ready(archived, emptySet())
             return@LaunchedEffect
@@ -305,6 +311,30 @@ private fun MainScreen(
             }
         }
 
+        if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
+            Panel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Le temps d'écran ne vient pas de Health Connect mais d'Android. Autorise " +
+                            "Sommeil dans « Accès aux données d'utilisation », puis reviens ici.",
+                        color = Palette.muted,
+                        fontSize = 13.sp,
+                    )
+                    OutlinedButton(onClick = { openUsageAccessSettings(context) }) {
+                        Text("Ouvrir le réglage", color = Palette.text)
+                    }
+                    if (display.notes) {
+                        Text(
+                            "Android n'en garde qu'une dizaine de jours : l'historique commence là, " +
+                                "puis s'allonge à chaque ouverture de l'app.",
+                            color = Palette.muted.copy(alpha = 0.7f),
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+            }
+        }
+
         if (series.isEmpty()) {
             if (display.notes) EmptyNote("Aucune donnée « ${metric.label.lowercase()} » pour cette année.")
         } else {
@@ -415,7 +445,7 @@ private fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metri
                     entry.label,
                     color = if (active) Palette.text else Palette.muted,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = 14.sp,
+                    fontSize = if (entries.size > 4) 12.sp else 14.sp,
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -745,10 +775,10 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 Metric.entries.filter { it.canHide }.forEach { entry ->
                     SettingSwitch(
                         title = entry.detailLabel,
-                        subtitle = if (entry == Metric.STEPS) {
-                            "Masquer retire aussi le panneau « activité et sommeil »"
-                        } else {
-                            "Visible dans le menu principal"
+                        subtitle = when (entry) {
+                            Metric.STEPS -> "Masquer retire aussi le panneau « activité et sommeil »"
+                            Metric.SCREEN -> "Lu dans Android, pas dans Health Connect"
+                            else -> "Visible dans le menu principal"
                         },
                         checked = entry in visible,
                         onChange = { on ->

@@ -180,7 +180,7 @@ private const val ASK_INSTRUCTION =
         "uniquement par le JSON, sans phrase autour et sans bloc de code. Format exact : " +
         "{\"metric\":\"SLEEP\",\"from\":\"AAAA-MM-JJ\",\"to\":\"AAAA-MM-JJ\"}. metric vaut " +
         "SLEEP pour le sommeil, STEPS pour les pas, HEART pour le cœur au repos, WEIGHT " +
-        "pour le poids. from et to sont des dates réelles, from avant ou égale à to. Tu ne " +
+        "pour le poids, SCREEN pour le temps d'écran. from et to sont des dates réelles, from avant ou égale à to. Tu ne " +
         "connais aucune donnée de santé : tu ne fais que convertir une période en dates."
 
 // ---------------------------------------------------------------------- Faits

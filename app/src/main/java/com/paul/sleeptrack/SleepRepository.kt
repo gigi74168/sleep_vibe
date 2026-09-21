@@ -215,6 +215,7 @@ fun demoHealthData(year: Int): HealthData {
     val steps = mutableMapOf<LocalDate, Long>()
     val heart = mutableMapOf<LocalDate, Double>()
     val weight = mutableMapOf<LocalDate, Double>()
+    val screen = mutableMapOf<LocalDate, Double>()
     var kg = 72.0
     var activeYesterday = false
 
@@ -237,7 +238,12 @@ fun demoHealthData(year: Int): HealthData {
             kg = (kg + rnd.nextDouble(-0.25, 0.22)).coerceIn(69.0, 76.0)
             weight[d] = kg
         }
+        // Plus d'écran le week-end ; aujourd'hui n'a pas de valeur, comme en vrai.
+        if (d.isBefore(today)) {
+            val weekend = d.dayOfWeek.value >= 6
+            screen[d] = ((if (weekend) 250.0 else 200.0) + rnd.nextDouble(-70.0, 90.0)).coerceAtLeast(40.0)
+        }
         d = d.plusDays(1)
     }
-    return HealthData(nights, steps, heart, weight)
+    return HealthData(nights, steps, heart, weight, screen)
 }
