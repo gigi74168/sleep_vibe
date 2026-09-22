@@ -36,7 +36,8 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   et résumé du dimanche comparant la semaine à la précédente. Calculés sur le téléphone.
 - **Widget** d'écran d'accueil : les dernières semaines de la métrique choisie dans les réglages,
   redimensionnable de 4x2 jusqu'à 2x1 (l'en-tête s'efface quand la tuile est trop plate).
-- **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android.
+- **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android, en
+  SD (1920 px de large, 1080p) ou en HD (3840 px, 4K).
 - **Métriques masquables** : pas, cœur au repos et poids se retirent du menu principal depuis les
   réglages ; leurs autorisations ne sont alors plus réclamées. Le sommeil reste toujours affiché.
 - **Sauvegarde JSON** : export et import d'un fichier lisible tel quel, une ligne par jour

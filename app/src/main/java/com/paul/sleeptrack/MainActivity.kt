@@ -269,8 +269,37 @@ private fun MainScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Sommeil", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { scope.launch { shareYearImage(context, year, metric, data) } }) {
-                Text("Partager", color = Palette.muted, fontSize = 14.sp)
+            Box {
+                var shareMenu by remember { mutableStateOf(false) }
+                // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
+                var sharing by remember { mutableStateOf(false) }
+                TextButton(onClick = { shareMenu = true }) {
+                    Text("Partager", color = Palette.muted, fontSize = 14.sp)
+                }
+                DropdownMenu(
+                    expanded = shareMenu,
+                    onDismissRequest = { shareMenu = false },
+                    containerColor = Palette.card,
+                ) {
+                    ShareQuality.entries.forEach { quality ->
+                        DropdownMenuItem(
+                            text = { Text(quality.label, color = Palette.text) },
+                            onClick = {
+                                shareMenu = false
+                                if (!sharing) {
+                                    sharing = true
+                                    scope.launch {
+                                        try {
+                                            shareYearImage(context, year, metric, data, quality)
+                                        } finally {
+                                            sharing = false
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
             }
             TextButton(onClick = onSettings) {
                 Text("Réglages", color = Palette.muted, fontSize = 14.sp)
