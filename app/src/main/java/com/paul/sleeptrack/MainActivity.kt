@@ -82,6 +82,7 @@ private fun SleepApp() {
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
+    val scope = rememberCoroutineScope()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -131,12 +132,15 @@ private fun SleepApp() {
                 // Health Connect a le dernier mot sur les jours qu'il connaît ; l'archive
                 // comble le reste.
                 val data = archived + loadYear(client, granted, year)
-                withContext(Dispatchers.IO) { Archive.merge(context, data) }
-                // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
-                // passage sur l'année en cours.
-                if (year == LocalDate.now().year) {
-                    DataCache.save(context, data)
-                    updateAllWidgets(context)
+                withContext(Dispatchers.IO) {
+                    Archive.merge(context, data)
+                    // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
+                    // passage sur l'année en cours. Le widget n'est redessiné que si son
+                    // image peut avoir changé : nouveau contenu, ou nouveau jour.
+                    if (year == LocalDate.now().year) {
+                        val changed = DataCache.save(context, data)
+                        if (changed || !widgetsDrawnToday()) updateAllWidgets(context)
+                    }
                 }
                 UiState.Ready(data, REQUESTED_PERMISSIONS - granted)
             }
@@ -161,7 +165,10 @@ private fun SleepApp() {
                     visibleMetrics = Prefs.visibleMetrics(context)
                     display = Prefs.display(context)
                     if (metric !in visibleMetrics) metric = Metric.SLEEP
-                    updateAllWidgets(context)
+                    // Dessiné hors du fil de l'interface : le retour à l'écran principal
+                    // n'attend plus le rendu des images du widget.
+                    val app = context.applicationContext
+                    scope.launch(Dispatchers.IO) { updateAllWidgets(app) }
                     // Un import a pu enrichir l'archive : on relit.
                     refreshKey++
                 },

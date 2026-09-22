@@ -24,8 +24,11 @@ private fun paint(color: Int, size: Float = 0f, bold: Boolean = false) = Paint(P
     }
 }
 
-private fun Canvas.cell(x: Float, y: Float, side: Float, color: Int) {
-    drawRoundRect(RectF(x, y, x + side, y + side), side * 0.3f, side * 0.3f, paint(color))
+// Un seul pinceau par image, recoloré à chaque case : un Paint par case en créait
+// plusieurs centaines par dessin, chacun avec sa mémoire native.
+private fun Canvas.cell(x: Float, y: Float, side: Float, color: Int, brush: Paint) {
+    brush.color = color
+    drawRoundRect(RectF(x, y, x + side, y + side), side * 0.3f, side * 0.3f, brush)
 }
 
 /** Bande des dernières semaines, pour le widget. */
@@ -77,13 +80,14 @@ fun renderStrip(
 
     val gridWidth = weeks * pitch
     val left = w - pad - gridWidth
+    val brush = paint(0)
     for (col in 0 until weeks) {
         for (row in 0..6) {
             val day = gridStart.plusDays(col * 7L + row)
             if (day.isAfter(today)) continue
             val value = shown[day]
             val color = value?.let { scale.colorOf(it).toArgb() } ?: Palette.empty.toArgb()
-            canvas.cell(left + col * pitch + (pitch - side) / 2, gridTop + row * pitch + (pitch - side) / 2, side, color)
+            canvas.cell(left + col * pitch + (pitch - side) / 2, gridTop + row * pitch + (pitch - side) / 2, side, color, brush)
         }
     }
     return bmp
@@ -153,6 +157,7 @@ fun renderYearCard(
     listOf(0 to "Lun", 2 to "Mer", 4 to "Ven", 6 to "Dim").forEach { (row, label) ->
         canvas.drawText(label, pad, gridTop + row * pitch + side * 0.8f, dayPaint)
     }
+    val brush = paint(0)
     for (col in 0 until weeks) {
         for (row in 0..6) {
             val day = gridStart.plusDays(col * 7L + row)
@@ -163,6 +168,7 @@ fun renderYearCard(
                 gridTop + row * pitch + (pitch - side) / 2,
                 side,
                 color,
+                brush,
             )
         }
     }
@@ -172,7 +178,7 @@ fun renderYearCard(
     val legendPaint = paint(Palette.muted.toArgb(), smallSize)
     var x = pad + labelWidth
     scale.colors.zip(scale.labels).forEach { (color, label) ->
-        canvas.cell(x, y - smallSize * 0.85f, smallSize, color.toArgb())
+        canvas.cell(x, y - smallSize * 0.85f, smallSize, color.toArgb(), brush)
         x += smallSize * 1.4f
         canvas.drawText(label, x, y, legendPaint)
         x += legendPaint.measureText(label) + smallSize * 1.2f

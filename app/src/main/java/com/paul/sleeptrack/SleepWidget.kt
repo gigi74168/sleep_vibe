@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.RemoteViews
+import java.time.LocalDate
 
 /**
  * Widget d'écran d'accueil : les dernières semaines de la métrique choisie dans l'app.
@@ -30,14 +31,31 @@ class SleepWidget : AppWidgetProvider() {
     }
 }
 
+/**
+ * Un seul dessin à la fois : l'app, les rappels et le système peuvent redessiner depuis
+ * des fils différents, et le dernier arrivé doit être celui qui a lu le cache le plus récent.
+ */
+private val widgetLock = Any()
+
+/** Jour du dernier dessin de tous les widgets. */
+@Volatile
+private var drawnOn: LocalDate? = null
+
+/**
+ * Le widget ne dépend que du cache, de la métrique choisie et de la date. Quand le cache
+ * n'a pas changé et qu'il a déjà été dessiné aujourd'hui, le redessiner donnerait la même image.
+ */
+fun widgetsDrawnToday(): Boolean = drawnOn == LocalDate.now()
+
 /** Redessine tous les widgets posés, après un chargement ou un changement de métrique. */
 fun updateAllWidgets(context: Context) {
     val manager = AppWidgetManager.getInstance(context) ?: return
     val ids = manager.getAppWidgetIds(ComponentName(context, SleepWidget::class.java))
     ids.forEach { renderWidget(context, manager, it) }
+    drawnOn = LocalDate.now()
 }
 
-private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetId: Int) {
+private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetId: Int) = synchronized(widgetLock) {
     val options = manager.getAppWidgetOptions(appWidgetId)
     val density = context.resources.displayMetrics.density
     val widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0).takeIf { it > 0 } ?: 250
