@@ -31,7 +31,8 @@ import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,11 +42,18 @@ import java.time.LocalDate
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Un arrêt forcé annule les alarmes : on les repose à chaque lancement.
-        Reminders.reschedule(this)
-        // Le résumé du dimanche rédigé par le modèle a été retiré en 2.7 : on efface le
-        // dernier texte préparé, dérivé des données de santé, que plus rien ne lira.
-        Prefs.of(this).edit().remove("ai_weekly_text").remove("ai_weekly_covers").apply()
+        // À chaque lancement, mais pas à chaque rotation : l'activité recréée n'a rien à
+        // reposer. Un arrêt forcé annule les alarmes et ferme aussi l'activité, donc le
+        // lancement suivant repasse bien par ici.
+        if (savedInstanceState == null) {
+            Reminders.reschedule(this)
+            // Le résumé du dimanche rédigé par le modèle a été retiré en 2.7 : on efface le
+            // dernier texte préparé, dérivé des données de santé, que plus rien ne lira.
+            val prefs = Prefs.of(this)
+            if (prefs.contains("ai_weekly_text") || prefs.contains("ai_weekly_covers")) {
+                prefs.edit().remove("ai_weekly_text").remove("ai_weekly_covers").apply()
+            }
+        }
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Palette.bg, surface = Palette.card)) {
@@ -79,7 +87,20 @@ private fun SleepApp() {
         PermissionController.createRequestPermissionResultContract()
     ) { refreshKey++ }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshKey++ }
+    // Relecture à chaque retour dans l'app. L'inscription rejoue les événements jusqu'à
+    // l'état courant : le ON_RESUME reçu à ce moment-là n'est pas un retour, et le
+    // chargement initial est déjà parti. Le compter lançait tout le chargement deux fois
+    // au démarrage, en parallèle.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        var replaying = true
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !replaying) refreshKey++
+        }
+        lifecycle.addObserver(observer)
+        replaying = false
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(year, demo, refreshKey) {
         if (demo) {
