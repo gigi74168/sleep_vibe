@@ -31,7 +31,8 @@ import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,11 +42,22 @@ import java.time.LocalDate
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Un arrêt forcé annule les alarmes : on les repose à chaque lancement.
-        Reminders.reschedule(this)
-        // Le résumé du dimanche rédigé par le modèle a été retiré en 2.7 : on efface le
-        // dernier texte préparé, dérivé des données de santé, que plus rien ne lira.
-        Prefs.of(this).edit().remove("ai_weekly_text").remove("ai_weekly_covers").apply()
+        // À chaque lancement, mais pas quand l'activité est seulement recréée (langue, thème,
+        // retour après la mort du processus) : il n'y a rien à reposer. Un arrêt forcé annule
+        // les alarmes et ferme aussi l'activité, donc le lancement suivant repasse par ici.
+        if (savedInstanceState == null) {
+            Reminders.reschedule(this)
+            // Le modèle local a été retiré (résumé du dimanche en 2.7, le reste ensuite) : on
+            // efface le dernier texte préparé, dérivé des données de santé, et le réglage
+            // qui ne commande plus rien.
+            val prefs = Prefs.of(this)
+            val stale = listOf("ai_weekly_text", "ai_weekly_covers", "show_ai").filter(prefs::contains)
+            if (stale.isNotEmpty()) {
+                val editor = prefs.edit()
+                stale.forEach { editor.remove(it) }
+                editor.apply()
+            }
+        }
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(background = Palette.bg, surface = Palette.card)) {
@@ -74,12 +86,26 @@ private fun SleepApp() {
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
+    val scope = rememberCoroutineScope()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { refreshKey++ }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshKey++ }
+    // Relecture à chaque retour dans l'app. L'inscription rejoue les événements jusqu'à
+    // l'état courant : le ON_RESUME reçu à ce moment-là n'est pas un retour, et le
+    // chargement initial est déjà parti. Le compter lançait tout le chargement deux fois
+    // au démarrage, en parallèle.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        var replaying = true
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !replaying) refreshKey++
+        }
+        lifecycle.addObserver(observer)
+        replaying = false
+        onDispose { lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(year, demo, refreshKey) {
         if (demo) {
@@ -90,9 +116,7 @@ private fun SleepApp() {
         // Connect ne la restitue plus, ou pas encore. Le temps d'écran y est versé d'abord :
         // Android n'en garde qu'une dizaine de jours, l'archive fait le reste.
         val archived = withContext(Dispatchers.IO) {
-            if (Metric.SCREEN in visibleMetrics) {
-                Archive.merge(context, HealthData(screen = readRecentScreenTime(context)))
-            }
+            if (Metric.SCREEN in visibleMetrics) syncScreenTime(context)
             Archive.load(context).filterYear(year)
         }
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
@@ -112,12 +136,15 @@ private fun SleepApp() {
                 // Health Connect a le dernier mot sur les jours qu'il connaît ; l'archive
                 // comble le reste.
                 val data = archived + loadYear(client, granted, year)
-                withContext(Dispatchers.IO) { Archive.merge(context, data) }
-                // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
-                // passage sur l'année en cours.
-                if (year == LocalDate.now().year) {
-                    DataCache.save(context, data)
-                    updateAllWidgets(context)
+                withContext(Dispatchers.IO) {
+                    Archive.merge(context, data)
+                    // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
+                    // passage sur l'année en cours. Le widget n'est redessiné que si son
+                    // image peut avoir changé : nouveau contenu, ou nouveau jour.
+                    if (year == LocalDate.now().year) {
+                        val changed = DataCache.save(context, data)
+                        if (changed || !widgetsDrawnToday()) updateAllWidgets(context)
+                    }
                 }
                 UiState.Ready(data, REQUESTED_PERMISSIONS - granted)
             }
@@ -142,7 +169,10 @@ private fun SleepApp() {
                     visibleMetrics = Prefs.visibleMetrics(context)
                     display = Prefs.display(context)
                     if (metric !in visibleMetrics) metric = Metric.SLEEP
-                    updateAllWidgets(context)
+                    // Dessiné hors du fil de l'interface : le retour à l'écran principal
+                    // n'attend plus le rendu des images du widget.
+                    val app = context.applicationContext
+                    scope.launch(Dispatchers.IO) { updateAllWidgets(app) }
                     // Un import a pu enrichir l'archive : on relit.
                     refreshKey++
                 },
@@ -216,9 +246,10 @@ private fun MainScreen(
     onSettings: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
-    val nano = rememberNano()
-    val currentYear = LocalDate.now().year
+    val today = LocalDate.now()
+    val currentYear = today.year
     val scale = remember(metric, data) { scaleFor(metric, data) }
     val series = remember(metric, data) { data.series(metric) }
     val config = LocalConfiguration.current
@@ -238,8 +269,37 @@ private fun MainScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Sommeil", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { shareYearImage(context, year, metric, data) }) {
-                Text("Partager", color = Palette.muted, fontSize = 14.sp)
+            Box {
+                var shareMenu by remember { mutableStateOf(false) }
+                // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
+                var sharing by remember { mutableStateOf(false) }
+                TextButton(onClick = { shareMenu = true }) {
+                    Text("Partager", color = Palette.muted, fontSize = 14.sp)
+                }
+                DropdownMenu(
+                    expanded = shareMenu,
+                    onDismissRequest = { shareMenu = false },
+                    containerColor = Palette.card,
+                ) {
+                    ShareQuality.entries.forEach { quality ->
+                        DropdownMenuItem(
+                            text = { Text(quality.label, color = Palette.text) },
+                            onClick = {
+                                shareMenu = false
+                                if (!sharing) {
+                                    sharing = true
+                                    scope.launch {
+                                        try {
+                                            shareYearImage(context, year, metric, data, quality)
+                                        } finally {
+                                            sharing = false
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
             }
             TextButton(onClick = onSettings) {
                 Text("Réglages", color = Palette.muted, fontSize = 14.sp)
@@ -304,13 +364,19 @@ private fun MainScreen(
         if (series.isEmpty()) {
             if (display.notes) EmptyNote("Aucune donnée « ${metric.label.lowercase()} » pour cette année.")
         } else {
+            // Mémorisées : toucher une case recompose l'écran, pas les chiffres. La date
+            // fait partie des clés, les tuiles « 7 derniers jours » et « série en cours » en
+            // dépendent.
             if (display.stats) {
-                val tiles = statTiles(metric, data, scale)
+                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale) }
                 StatRow(tiles[0], tiles[1])
                 StatRow(tiles[2], tiles[3])
             }
             if (display.streaks) {
-                streakTiles(metric, data, display.goalMinutes, year)?.let { (current, best) ->
+                val streaks = remember(metric, data, display.goalMinutes, year, today) {
+                    streakTiles(metric, data, display.goalMinutes, year, today)
+                }
+                streaks?.let { (current, best) ->
                     StatRow(current, best)
                     if (display.notes) {
                         targetFor(metric, display.goalMinutes)?.let { target ->
@@ -328,17 +394,6 @@ private fun MainScreen(
             data.steps.isNotEmpty() && data.nights.isNotEmpty()
         ) {
             Panel { CorrelationPanel(data, showNotes = display.notes) }
-        }
-
-        if (display.ai) {
-            // Le commentaire vient après les chiffres : il les croise, il ne les annonce pas.
-            if (nano.ready && series.isNotEmpty()) {
-                Panel { NanoComment(nano, metric, data, display.goalMinutes, year) }
-            }
-            // Ne s'affiche que si Nano est supporté mais pas encore téléchargé.
-            if (nano.status == NanoStatus.DOWNLOADABLE || nano.status == NanoStatus.DOWNLOADING) {
-                Panel { NanoDownloadPanel(nano) }
-            }
         }
 
         val relevantMissing = remember(missing, visibleMetrics) {
@@ -521,7 +576,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     var backupStatus by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val nano = rememberNano()
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -566,6 +620,9 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 withContext(Dispatchers.IO) {
                     val imported = importBackup(context, uri)
                     Archive.merge(context, imported)
+                    // Les jours récents relus dans Android reprennent la main sur ceux du
+                    // fichier dès le retour à l'écran principal, comme avant.
+                    forgetScreenTimeSync(context)
                     dayCount(imported)
                 }
             }.fold(
@@ -783,18 +840,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                     checked = display.notes,
                 ) { on ->
                     Prefs.setFlag(context, Prefs.SHOW_NOTES, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Commentaires du modèle local",
-                    subtitle = if (nano.ready) {
-                        "Deux phrases rédigées sur le téléphone, sous les statistiques"
-                    } else {
-                        "Ce téléphone ne fait pas tourner le modèle : sans effet ici"
-                    },
-                    checked = display.ai,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_AI, on)
                     display = Prefs.display(context)
                 }
             }

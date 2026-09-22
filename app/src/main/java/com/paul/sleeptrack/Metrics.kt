@@ -14,16 +14,22 @@ data class HealthData(
     /** Minutes d'écran allumé et déverrouillé. */
     val screen: Map<LocalDate, Double> = emptyMap(),
 ) {
+    // Les séries servent partout (grille, tuiles, séries, semaine type, détail du jour,
+    // widget) : converties une fois par jeu de données plutôt qu'à chaque appel.
+    private val sleepSeries by lazy { nights.mapValues { it.value.toMinutes().toDouble() } }
+    private val stepSeries by lazy { steps.mapValues { it.value.toDouble() } }
+
     /** Série normalisée : minutes, pas, bpm, kg ou minutes d'écran selon la métrique. */
     fun series(metric: Metric): Map<LocalDate, Double> = when (metric) {
-        Metric.SLEEP -> nights.mapValues { it.value.toMinutes().toDouble() }
-        Metric.STEPS -> steps.mapValues { it.value.toDouble() }
+        Metric.SLEEP -> sleepSeries
+        Metric.STEPS -> stepSeries
         Metric.HEART -> heart
         Metric.WEIGHT -> weight
         Metric.SCREEN -> screen
     }
 
-    fun isEmpty(): Boolean = Metric.entries.all { series(it).isEmpty() }
+    fun isEmpty(): Boolean =
+        nights.isEmpty() && steps.isEmpty() && heart.isEmpty() && weight.isEmpty() && screen.isEmpty()
 
     fun filterYear(year: Int) = HealthData(
         nights.filterKeys { it.year == year },

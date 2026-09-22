@@ -10,6 +10,8 @@ import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -46,19 +48,30 @@ private val NOT_ASLEEP = setOf(
     SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED,
 )
 
-/** Lit toutes les métriques autorisées entre deux dates incluses. */
+/**
+ * Lit toutes les métriques autorisées entre deux dates incluses. Les quatre lectures
+ * partent ensemble : on attend la plus lente, et non plus leur somme.
+ * Les résultats sont attendus dans l'ordre d'avant, pour qu'en cas d'échecs multiples ce
+ * soit la même erreur qui remonte.
+ */
 suspend fun loadHealthData(
     client: HealthConnectClient,
     granted: Set<String>,
     from: LocalDate,
     to: LocalDate,
     zone: ZoneId = ZoneId.systemDefault(),
-): HealthData = HealthData(
-    nights = if (PERMISSION_READ_SLEEP in granted) readSleepByNight(client, from, to, zone) else emptyMap(),
-    steps = if (PERMISSION_READ_STEPS in granted) readStepsByDay(client, from, to, zone) else emptyMap(),
-    heart = if (PERMISSION_READ_HEART in granted) readRestingHeartRate(client, from, to, zone) else emptyMap(),
-    weight = if (PERMISSION_READ_WEIGHT in granted) readWeight(client, from, to, zone) else emptyMap(),
-)
+): HealthData = supervisorScope {
+    val nights = async { if (PERMISSION_READ_SLEEP in granted) readSleepByNight(client, from, to, zone) else emptyMap() }
+    val steps = async { if (PERMISSION_READ_STEPS in granted) readStepsByDay(client, from, to, zone) else emptyMap() }
+    val heart = async { if (PERMISSION_READ_HEART in granted) readRestingHeartRate(client, from, to, zone) else emptyMap() }
+    val weight = async { if (PERMISSION_READ_WEIGHT in granted) readWeight(client, from, to, zone) else emptyMap() }
+    HealthData(
+        nights = nights.await(),
+        steps = steps.await(),
+        heart = heart.await(),
+        weight = weight.await(),
+    )
+}
 
 suspend fun loadYear(
     client: HealthConnectClient,
@@ -129,26 +142,33 @@ suspend fun readStepsByDay(
     from: LocalDate,
     to: LocalDate,
     zone: ZoneId = ZoneId.systemDefault(),
-): Map<LocalDate, Long> {
-    val out = mutableMapOf<LocalDate, Long>()
+): Map<LocalDate, Long> = supervisorScope {
     val limit = minOf(to.plusDays(1), LocalDate.now(zone).plusDays(1))
-    var chunkStart = from
-    while (chunkStart.isBefore(limit)) {
-        val chunkEnd = minOf(chunkStart.plusMonths(1), limit)
-        val groups = client.aggregateGroupByPeriod(
-            AggregateGroupByPeriodRequest(
-                metrics = setOf(StepsRecord.COUNT_TOTAL),
-                timeRangeFilter = TimeRangeFilter.between(chunkStart.atStartOfDay(), chunkEnd.atStartOfDay()),
-                timeRangeSlicer = Period.ofDays(1),
+    val chunks = generateSequence(from) { it.plusMonths(1) }
+        .takeWhile { it.isBefore(limit) }
+        .map { start -> start to minOf(start.plusMonths(1), limit) }
+        .toList()
+    // Un appel par mois, lancés ensemble plutôt que l'un après l'autre ; les mois sont
+    // ensuite repris dans l'ordre, comme la boucle d'avant.
+    val pending = chunks.map { (chunkStart, chunkEnd) ->
+        async {
+            client.aggregateGroupByPeriod(
+                AggregateGroupByPeriodRequest(
+                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(chunkStart.atStartOfDay(), chunkEnd.atStartOfDay()),
+                    timeRangeSlicer = Period.ofDays(1),
+                )
             )
-        )
-        for (group in groups) {
+        }
+    }
+    val out = mutableMapOf<LocalDate, Long>()
+    for (groups in pending) {
+        for (group in groups.await()) {
             val count = group.result[StepsRecord.COUNT_TOTAL] ?: continue
             if (count > 0) out[group.startTime.toLocalDate()] = count
         }
-        chunkStart = chunkStart.plusMonths(1)
     }
-    return out
+    out
 }
 
 /** Fréquence cardiaque au repos : moyenne des relevés du jour. */

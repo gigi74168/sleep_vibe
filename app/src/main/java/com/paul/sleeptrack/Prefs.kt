@@ -2,7 +2,9 @@ package com.paul.sleeptrack
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.AtomicFile
 import org.json.JSONObject
+import java.io.File
 import java.time.Duration
 import java.time.LocalDate
 
@@ -24,9 +26,10 @@ object Prefs {
     const val SHOW_LEGEND = "show_legend"
     const val SHOW_CORRELATION = "show_correlation"
     const val SHOW_NOTES = "show_notes"
-    const val SHOW_AI = "show_ai"
     const val CELL_SIZE = "cell_size"
     const val LANDSCAPE_BIG = "landscape_big"
+    /** Jour (et fuseau) de la dernière lecture du temps d'écran. */
+    const val SCREEN_SYNCED = "screen_synced"
 
     const val DEFAULT_EVENING_HOUR = 22
     const val DEFAULT_WEEKLY_HOUR = 19
@@ -55,7 +58,6 @@ object Prefs {
             legend = it.getBoolean(SHOW_LEGEND, true),
             correlation = it.getBoolean(SHOW_CORRELATION, true),
             notes = it.getBoolean(SHOW_NOTES, true),
-            ai = it.getBoolean(SHOW_AI, true),
             cellSize = it.getInt(CELL_SIZE, 0),
             landscapeBig = it.getBoolean(LANDSCAPE_BIG, true),
             goalMinutes = it.getInt(GOAL_MINUTES, DEFAULT_GOAL_MINUTES),
@@ -119,8 +121,6 @@ data class DisplayPrefs(
     val legend: Boolean = true,
     val correlation: Boolean = true,
     val notes: Boolean = true,
-    /** Commentaires rédigés par Gemini Nano, là où l'appareil sait les produire. */
-    val ai: Boolean = true,
     val cellSize: Int = 0,
     val landscapeBig: Boolean = true,
     /** Repris ici parce que les séries s'en servent comme seuil. */
@@ -129,14 +129,27 @@ data class DisplayPrefs(
 
 /**
  * Dernières données lues, gardées pour que le widget et les rappels aient quelque chose
- * à afficher sans rouvrir l'app. Rien ne sort du téléphone : c'est un simple fichier de
- * préférences privé.
+ * à afficher sans rouvrir l'app. Rien ne sort du téléphone : c'est un simple fichier privé.
+ *
+ * Il vivait dans les préférences, que chaque démarrage de processus (widget compris) relit
+ * en entier et que chaque modification réécrit en entier. Il a maintenant son propre
+ * fichier, gardé en mémoire, et réécrit seulement quand son contenu change.
  */
 object DataCache {
-    private const val KEY = "cache"
+    private const val FILE = "cache.json"
+    /** Ancien emplacement, dans les préférences : relu une fois, effacé à l'écriture suivante. */
+    private const val LEGACY_KEY = "cache"
     private const val DAYS_KEPT = 200L
 
-    fun save(context: Context, data: HealthData) {
+    private val lock = Any()
+    /** Contenu du fichier, pour savoir sans le relire si une sauvegarde change quelque chose. */
+    private var stored: String? = null
+    private var decoded: HealthData? = null
+
+    private fun file(context: Context) = AtomicFile(File(context.applicationContext.filesDir, FILE))
+
+    /** Garde les derniers jours. Renvoie false quand le cache avait déjà ce contenu. */
+    fun save(context: Context, data: HealthData): Boolean = synchronized(lock) {
         val floor = LocalDate.now().minusDays(DAYS_KEPT)
         val root = JSONObject()
         root.put("sleep", jsonOf(data.nights.filterKeys { it > floor }.mapValues { it.value.toMinutes().toDouble() }))
@@ -144,13 +157,32 @@ object DataCache {
         root.put("heart", jsonOf(data.heart.filterKeys { it > floor }))
         root.put("weight", jsonOf(data.weight.filterKeys { it > floor }))
         root.put("screen", jsonOf(data.screen.filterKeys { it > floor }))
-        Prefs.of(context).edit().putString(KEY, root.toString()).apply()
+        val json = root.toString()
+        if (json == raw(context)) return false
+
+        val f = file(context)
+        runCatching {
+            val out = f.startWrite()
+            try {
+                out.write(json.toByteArray(Charsets.UTF_8))
+                f.finishWrite(out)
+            } catch (e: Exception) {
+                f.failWrite(out)
+                throw e
+            }
+        }
+        // Comme les préférences avant lui : la mémoire suit même si le disque a refusé.
+        stored = json
+        decoded = null
+        Prefs.of(context).let { if (it.contains(LEGACY_KEY)) it.edit().remove(LEGACY_KEY).apply() }
+        true
     }
 
-    fun load(context: Context): HealthData {
-        val raw = Prefs.of(context).getString(KEY, null) ?: return HealthData()
-        return runCatching {
-            val root = JSONObject(raw)
+    fun load(context: Context): HealthData = synchronized(lock) {
+        decoded?.let { return it }
+        val text = raw(context) ?: return HealthData()
+        runCatching {
+            val root = JSONObject(text)
             HealthData(
                 nights = readMap(root, "sleep").mapValues { Duration.ofMinutes(it.value.toLong()) },
                 steps = readMap(root, "steps").mapValues { it.value.toLong() },
@@ -158,12 +190,19 @@ object DataCache {
                 weight = readMap(root, "weight"),
                 screen = readMap(root, "screen"),
             )
-        }.getOrDefault(HealthData())
+        }.getOrDefault(HealthData()).also { decoded = it }
     }
 
+    private fun raw(context: Context): String? = stored ?: (
+        runCatching { file(context).readFully().toString(Charsets.UTF_8) }.getOrNull()
+            ?: Prefs.of(context).getString(LEGACY_KEY, null)
+        ).also { stored = it }
+
+    // Dates triées : le même contenu donne toujours le même texte, ce qui rend la
+    // comparaison de save() fiable d'un processus à l'autre.
     private fun jsonOf(values: Map<LocalDate, Double>): JSONObject {
         val obj = JSONObject()
-        values.forEach { (date, value) -> obj.put(date.toString(), value) }
+        values.toSortedMap().forEach { (date, value) -> obj.put(date.toString(), value) }
         return obj
     }
 

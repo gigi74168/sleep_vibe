@@ -2,6 +2,7 @@ package com.paul.sleeptrack
 
 import android.content.Context
 import android.net.Uri
+import android.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -32,27 +33,57 @@ const val BACKUP_FORMAT = 1
 object Archive {
     private const val FILE = "archive.json"
 
-    private fun file(context: Context) = File(context.applicationContext.filesDir, FILE)
+    /**
+     * Copie en mémoire du fichier, relu une fois par processus et non plus à chaque
+     * ouverture. Le verrou sérialise lectures et écritures : deux fusions simultanées
+     * pouvaient lire un fichier à moitié écrit, le prendre pour vide et écraser l'historique.
+     */
+    private val lock = Any()
+    private var cached: HealthData? = null
 
-    fun load(context: Context): HealthData = runCatching {
-        val f = file(context)
-        if (f.exists()) decodeBackup(JSONObject(f.readText())) else HealthData()
+    // Écrit à côté puis renomme : une lecture ne tombe jamais sur un fichier à moitié
+    // écrit, et un arrêt en pleine écriture laisse la version précédente intacte.
+    private fun file(context: Context) = AtomicFile(File(context.applicationContext.filesDir, FILE))
+
+    fun load(context: Context): HealthData = synchronized(lock) {
+        cached ?: read(context).also { cached = it }
+    }
+
+    // Fichier absent (premier lancement) ou illisible : historique vide, comme avant.
+    private fun read(context: Context): HealthData = runCatching {
+        decodeBackup(JSONObject(file(context).readFully().toString(Charsets.UTF_8)))
     }.getOrDefault(HealthData())
 
-    fun save(context: Context, data: HealthData) {
-        runCatching { file(context).writeText(encodeBackup(data).toString()) }
+    fun save(context: Context, data: HealthData): Unit = synchronized(lock) {
+        val f = file(context)
+        val written = runCatching {
+            val out = f.startWrite()
+            try {
+                out.write(encodeBackup(data).toString().toByteArray(Charsets.UTF_8))
+                f.finishWrite(out)
+            } catch (e: Exception) {
+                f.failWrite(out)
+                throw e
+            }
+        }.isSuccess
+        // Si l'écriture a échoué, la prochaine lecture repart du fichier, comme avant.
+        cached = if (written) data else null
     }
 
     /** Ajoute sans rien perdre ; en cas de doublon, la valeur entrante gagne. */
-    fun merge(context: Context, incoming: HealthData): HealthData {
-        if (incoming.isEmpty()) return load(context)
-        val merged = load(context) + incoming
-        save(context, merged)
-        return merged
+    fun merge(context: Context, incoming: HealthData): HealthData = synchronized(lock) {
+        val current = load(context)
+        if (incoming.isEmpty()) return current
+        val merged = current + incoming
+        // Rien de neuf, le cas de presque chaque ouverture : pas de réécriture.
+        if (merged != current) save(context, merged)
+        merged
     }
 
-    fun clear(context: Context) {
+    fun clear(context: Context): Unit = synchronized(lock) {
         runCatching { file(context).delete() }
+        cached = null
+        forgetScreenTimeSync(context)
     }
 }
 

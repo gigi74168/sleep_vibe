@@ -7,9 +7,9 @@ plus la nuit est longue (ou la journée active), plus la case est verte ; plus e
 
 Les données viennent de [Health Connect](https://health.google/health-connect-android/) et restent sur le téléphone : l'app ne demande pas la permission `INTERNET`, n'envoie rien nulle part et n'écrit dans aucun stockage externe.
 
-Une seule nuance depuis les commentaires hors ligne : le modèle Gemini Nano est téléchargé
-une fois par AICore, le service système d'Android, et pas par l'app. C'est du réseau sur le
-téléphone, mais dans l'autre sens — rien de tes données ne part avec.
+Les versions 2.4 à 2.7.1 faisaient exception : la bibliothèque ML Kit des commentaires Gemini
+Nano ajoutait d'elle-même `INTERNET` et un service de télémétrie au manifeste. Elle est retirée,
+et avec elle ces deux ajouts.
 
 L'app refuse aussi la sauvegarde automatique d'Android (`allowBackup="false"` et
 `data_extraction_rules.xml`), qui recopierait sinon l'historique de santé vers le Google Drive du
@@ -34,13 +34,12 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   et la nuit qui la suit, avec la comparaison « après 8 000 pas ou plus » contre « après une journée calme ».
 - **Rappels** (optionnels) : rappel du soir quand la moyenne des 7 derniers jours passe sous l'objectif,
   et résumé du dimanche comparant la semaine à la précédente. Calculés sur le téléphone.
-- **Commentaires hors ligne** (appareils compatibles) : deux phrases qui croisent tes chiffres.
-  Elles sont produites par [Gemini Nano](https://developers.google.com/ml-kit/genai)
-  sur le téléphone, à partir des statistiques que l'app a déjà calculées — voir
-  [Commentaires hors ligne](#commentaires-hors-ligne).
 - **Widget** d'écran d'accueil : les dernières semaines de la métrique choisie dans les réglages,
   redimensionnable de 4x2 jusqu'à 2x1 (l'en-tête s'efface quand la tuile est trop plate).
-- **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android.
+  Pas de rafraîchissement périodique : il est redessiné quand ses données changent, et au
+  passage à minuit par une alarme qui ne réveille pas le téléphone.
+- **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android, en
+  SD (1920 px de large, 1080p) ou en HD (3840 px, 4K).
 - **Métriques masquables** : pas, cœur au repos et poids se retirent du menu principal depuis les
   réglages ; leurs autorisations ne sont alors plus réclamées. Le sommeil reste toujours affiché.
 - **Sauvegarde JSON** : export et import d'un fichier lisible tel quel, une ligne par jour
@@ -64,32 +63,6 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 
 Le poids n'a pas de « bon » côté : il reçoit un dégradé bleu neutre, calé sur les quintiles
 de l'année affichée (du plus léger au plus lourd), avec les seuils réels en légende.
-
-## Commentaires hors ligne
-
-Une fonction s'appuie sur les [ML Kit GenAI APIs](https://developers.google.com/ml-kit/genai)
-(Prompt API, `com.google.mlkit:genai-prompt`), qui font tourner Gemini Nano sur l'appareil :
-
-| Fonction | Où |
-| --- | --- |
-| « Ce qui ressort » : deux phrases qui croisent moyenne, séries, semaine type et corrélation | sous les panneaux de la métrique affichée |
-
-**Le modèle rédige, il ne compte pas.** Tous les chiffres qu'il reçoit sont déjà calculés par
-l'app, et la consigne lui interdit d'en inventer ou d'en recalculer.
-
-### Ce qui ne marche pas, et pourquoi
-
-- **Tous les téléphones ne sont pas concernés.** Le Prompt API couvre une liste plus courte que
-  les autres APIs ML Kit, et exclut les appareils au bootloader déverrouillé. Quand le modèle
-  n'est pas disponible, le commentaire disparaît : l'app est alors exactement celle
-  d'avant, sans bouton grisé ni message d'erreur. Liste à jour :
-  [device support](https://developers.google.com/ml-kit/genai#device-support).
-- **Pas d'inférence en arrière-plan.** AICore la refuse (`BACKGROUND_USE_BLOCKED`), ce qui exclut
-  le widget et les rappels : le résumé du dimanche reste celui calculé par l'app.
-- **APIs en Beta** : pas de SLA, et les signatures peuvent changer. Les
-  [ML Kit GenAI API Additional Terms](https://developers.google.com/ml-kit/genai-terms)
-  s'appliquent. Aucun coût : l'inférence tourne sur l'appareil, il n'y a pas d'endpoint facturé.
-- Le tout se coupe dans **Réglages → Affichage → « Commentaires du modèle local »**.
 
 ## Format de sauvegarde
 

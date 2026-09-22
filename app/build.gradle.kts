@@ -12,8 +12,8 @@ android {
         applicationId = "com.paul.sleeptrack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "2.7.1"
+        versionCode = 11
+        versionName = "3.0.0"
     }
 
     buildTypes {
@@ -48,8 +48,4 @@ dependencies {
     // déjà tirés en transitif, déclarés ici parce qu'on les utilise directement.
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    // Gemini Nano en local, via AICore. Beta : les signatures peuvent encore bouger.
-    // Le modèle est téléchargé par le service système, pas par l'app : aucune
-    // permission INTERNET à ajouter ici.
-    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 }

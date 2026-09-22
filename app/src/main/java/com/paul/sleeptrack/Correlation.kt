@@ -70,10 +70,6 @@ data class CorrelationInsight(
             abs(r) < 0.40 -> "Lien modéré"
             else -> "Lien net"
         }
-
-    val direction: String
-        get() = if (r >= 0) "les journées actives précèdent des nuits plus longues"
-        else "les journées actives précèdent des nuits plus courtes"
 }
 
 fun correlationInsight(data: HealthData): CorrelationInsight? {

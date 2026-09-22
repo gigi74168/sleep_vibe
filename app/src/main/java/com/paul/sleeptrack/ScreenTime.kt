@@ -3,6 +3,7 @@ package com.paul.sleeptrack
 import android.Manifest
 import android.app.AppOpsManager
 import android.app.usage.UsageEvents
+import android.app.usage.UsageEventsQuery
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -22,12 +23,46 @@ import java.time.ZoneId
  * compte aussi.
  *
  * Android ne garde ces événements qu'une dizaine de jours. L'app les verse dans son archive à
- * chaque ouverture : l'historique s'allonge ensuite tout seul, tant qu'elle est ouverte au
- * moins une fois par semaine.
+ * la première ouverture de chaque jour : l'historique s'allonge ensuite tout seul, tant
+ * qu'elle est ouverte au moins une fois par semaine.
  */
 
-/** Jours relus à chaque ouverture ; au-delà, Android a de toute façon purgé les événements. */
+/** Jours relus à chaque lecture ; au-delà, Android a de toute façon purgé les événements. */
 private const val LOOKBACK_DAYS = 14L
+
+/** Les seuls événements qui servent au calcul. */
+private val SCREEN_EVENTS = intArrayOf(
+    UsageEvents.Event.SCREEN_INTERACTIVE,
+    UsageEvents.Event.SCREEN_NON_INTERACTIVE,
+    UsageEvents.Event.KEYGUARD_SHOWN,
+    UsageEvents.Event.KEYGUARD_HIDDEN,
+)
+
+/**
+ * Verse dans l'archive les jours d'écran terminés. La journée en cours étant exclue, le
+ * résultat ne change qu'avec la date : une lecture par jour suffit, et les ouvertures
+ * suivantes retrouvent ces jours dans l'archive au lieu de relire deux semaines
+ * d'événements.
+ */
+fun syncScreenTime(context: Context, zone: ZoneId = ZoneId.systemDefault()) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || !hasUsageAccess(context)) return
+    // Le fuseau entre dans la clé : en changer redécoupe les journées.
+    val stamp = "${LocalDate.now(zone)}|${zone.id}"
+    val prefs = Prefs.of(context)
+    if (prefs.getString(Prefs.SCREEN_SYNCED, null) == stamp) return
+    val days = readRecentScreenTime(context, zone)
+    if (days.isEmpty()) return
+    Archive.merge(context, HealthData(screen = days))
+    prefs.edit().putString(Prefs.SCREEN_SYNCED, stamp).apply()
+}
+
+/**
+ * Force la relecture à la prochaine ouverture : après un effacement de l'archive, ou un
+ * import qui a pu y poser d'autres valeurs pour les derniers jours.
+ */
+fun forgetScreenTimeSync(context: Context) {
+    Prefs.of(context).edit().remove(Prefs.SCREEN_SYNCED).apply()
+}
 
 /**
  * L'accès « données d'utilisation » est une autorisation spéciale, donnée depuis les réglages.
@@ -76,7 +111,7 @@ fun readRecentScreenTime(context: Context, zone: ZoneId = ZoneId.systemDefault()
     val start = from.atStartOfDay(zone).toInstant().toEpochMilli()
     val end = today.atStartOfDay(zone).toInstant().toEpochMilli()
     // Un jour de plus en amont, pour savoir si l'écran était déjà allumé à minuit.
-    val events = usage.queryEvents(start - 86_400_000L, end) ?: return emptyMap()
+    val events = queryScreenEvents(usage, start - 86_400_000L, end) ?: return emptyMap()
 
     val totals = mutableMapOf<LocalDate, Double>()
     fun credit(from: Long, to: Long) {
@@ -123,3 +158,15 @@ fun readRecentScreenTime(context: Context, zone: ZoneId = ZoneId.systemDefault()
     }
     return totals.filterKeys { it >= firstFullDay && it < today }
 }
+
+/**
+ * Depuis Android 15, on ne demande que les événements écran et verrouillage, au lieu de
+ * recevoir deux semaines d'activité de toutes les applis pour en jeter presque tout. Le
+ * calcul ignore de toute façon les autres types : le résultat est le même.
+ */
+private fun queryScreenEvents(usage: UsageStatsManager, begin: Long, end: Long): UsageEvents? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        usage.queryEvents(UsageEventsQuery.Builder(begin, end).setEventTypes(*SCREEN_EVENTS).build())
+    } else {
+        usage.queryEvents(begin, end)
+    }
