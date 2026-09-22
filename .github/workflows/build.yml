@@ -1,7 +1,5 @@
-# Compile l'app à chaque push. Le dépôt n'avait rien qui vérifie qu'il compile, et les
-# ML Kit GenAI APIs sont en Beta : un nom de classe qui bouge entre deux versions ne se
-# voit qu'ici. L'APK produit est gardé en artéfact, de quoi l'installer sans rien compiler
-# soi-même.
+# Compile l'app à chaque push : rien d'autre dans le dépôt ne vérifie qu'elle compile.
+# L'APK produit est gardé en artéfact, de quoi l'installer sans rien compiler soi-même.
 name: Compilation
 
 on:

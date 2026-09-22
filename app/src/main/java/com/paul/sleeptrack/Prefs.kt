@@ -26,7 +26,6 @@ object Prefs {
     const val SHOW_LEGEND = "show_legend"
     const val SHOW_CORRELATION = "show_correlation"
     const val SHOW_NOTES = "show_notes"
-    const val SHOW_AI = "show_ai"
     const val CELL_SIZE = "cell_size"
     const val LANDSCAPE_BIG = "landscape_big"
     /** Jour (et fuseau) de la dernière lecture du temps d'écran. */
@@ -59,7 +58,6 @@ object Prefs {
             legend = it.getBoolean(SHOW_LEGEND, true),
             correlation = it.getBoolean(SHOW_CORRELATION, true),
             notes = it.getBoolean(SHOW_NOTES, true),
-            ai = it.getBoolean(SHOW_AI, true),
             cellSize = it.getInt(CELL_SIZE, 0),
             landscapeBig = it.getBoolean(LANDSCAPE_BIG, true),
             goalMinutes = it.getInt(GOAL_MINUTES, DEFAULT_GOAL_MINUTES),
@@ -123,8 +121,6 @@ data class DisplayPrefs(
     val legend: Boolean = true,
     val correlation: Boolean = true,
     val notes: Boolean = true,
-    /** Commentaires rédigés par Gemini Nano, là où l'appareil sait les produire. */
-    val ai: Boolean = true,
     val cellSize: Int = 0,
     val landscapeBig: Boolean = true,
     /** Repris ici parce que les séries s'en servent comme seuil. */

@@ -47,11 +47,15 @@ class MainActivity : ComponentActivity() {
         // lancement suivant repasse bien par ici.
         if (savedInstanceState == null) {
             Reminders.reschedule(this)
-            // Le résumé du dimanche rédigé par le modèle a été retiré en 2.7 : on efface le
-            // dernier texte préparé, dérivé des données de santé, que plus rien ne lira.
+            // Le modèle local a été retiré (résumé du dimanche en 2.7, le reste ensuite) : on
+            // efface le dernier texte préparé, dérivé des données de santé, et le réglage
+            // qui ne commande plus rien.
             val prefs = Prefs.of(this)
-            if (prefs.contains("ai_weekly_text") || prefs.contains("ai_weekly_covers")) {
-                prefs.edit().remove("ai_weekly_text").remove("ai_weekly_covers").apply()
+            val stale = listOf("ai_weekly_text", "ai_weekly_covers", "show_ai").filter(prefs::contains)
+            if (stale.isNotEmpty()) {
+                val editor = prefs.edit()
+                stale.forEach { editor.remove(it) }
+                editor.apply()
             }
         }
         enableEdgeToEdge()
@@ -244,8 +248,6 @@ private fun MainScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
-    // Commentaires désactivés : ni client ML Kit, ni interrogation d'AICore.
-    val nano = if (display.ai) rememberNano() else null
     val today = LocalDate.now()
     val currentYear = today.year
     val scale = remember(metric, data) { scaleFor(metric, data) }
@@ -363,17 +365,6 @@ private fun MainScreen(
             data.steps.isNotEmpty() && data.nights.isNotEmpty()
         ) {
             Panel { CorrelationPanel(data, showNotes = display.notes) }
-        }
-
-        if (nano != null) {
-            // Le commentaire vient après les chiffres : il les croise, il ne les annonce pas.
-            if (nano.ready && series.isNotEmpty()) {
-                Panel { NanoComment(nano, metric, data, display.goalMinutes, year) }
-            }
-            // Ne s'affiche que si Nano est supporté mais pas encore téléchargé.
-            if (nano.status == NanoStatus.DOWNLOADABLE || nano.status == NanoStatus.DOWNLOADING) {
-                Panel { NanoDownloadPanel(nano) }
-            }
         }
 
         val relevantMissing = remember(missing, visibleMetrics) {
@@ -556,7 +547,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     var backupStatus by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val nano = rememberNano()
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -821,18 +811,6 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                     checked = display.notes,
                 ) { on ->
                     Prefs.setFlag(context, Prefs.SHOW_NOTES, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Commentaires du modèle local",
-                    subtitle = if (nano.ready) {
-                        "Deux phrases rédigées sur le téléphone, sous les statistiques"
-                    } else {
-                        "Ce téléphone ne fait pas tourner le modèle : sans effet ici"
-                    },
-                    checked = display.ai,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_AI, on)
                     display = Prefs.display(context)
                 }
             }
