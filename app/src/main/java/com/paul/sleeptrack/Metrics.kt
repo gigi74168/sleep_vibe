@@ -23,7 +23,8 @@ data class HealthData(
         Metric.SCREEN -> screen
     }
 
-    fun isEmpty(): Boolean = Metric.entries.all { series(it).isEmpty() }
+    fun isEmpty(): Boolean =
+        nights.isEmpty() && steps.isEmpty() && heart.isEmpty() && weight.isEmpty() && screen.isEmpty()
 
     fun filterYear(year: Int) = HealthData(
         nights.filterKeys { it.year == year },
