@@ -83,6 +83,7 @@ object Archive {
     fun clear(context: Context): Unit = synchronized(lock) {
         runCatching { file(context).delete() }
         cached = null
+        forgetScreenTimeSync(context)
     }
 }
 

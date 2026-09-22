@@ -111,9 +111,7 @@ private fun SleepApp() {
         // Connect ne la restitue plus, ou pas encore. Le temps d'écran y est versé d'abord :
         // Android n'en garde qu'une dizaine de jours, l'archive fait le reste.
         val archived = withContext(Dispatchers.IO) {
-            if (Metric.SCREEN in visibleMetrics) {
-                Archive.merge(context, HealthData(screen = readRecentScreenTime(context)))
-            }
+            if (Metric.SCREEN in visibleMetrics) syncScreenTime(context)
             Archive.load(context).filterYear(year)
         }
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
@@ -587,6 +585,9 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 withContext(Dispatchers.IO) {
                     val imported = importBackup(context, uri)
                     Archive.merge(context, imported)
+                    // Les jours récents relus dans Android reprennent la main sur ceux du
+                    // fichier dès le retour à l'écran principal, comme avant.
+                    forgetScreenTimeSync(context)
                     dayCount(imported)
                 }
             }.fold(

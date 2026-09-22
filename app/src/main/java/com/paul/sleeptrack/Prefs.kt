@@ -27,6 +27,8 @@ object Prefs {
     const val SHOW_AI = "show_ai"
     const val CELL_SIZE = "cell_size"
     const val LANDSCAPE_BIG = "landscape_big"
+    /** Jour (et fuseau) de la dernière lecture du temps d'écran. */
+    const val SCREEN_SYNCED = "screen_synced"
 
     const val DEFAULT_EVENING_HOUR = 22
     const val DEFAULT_WEEKLY_HOUR = 19
