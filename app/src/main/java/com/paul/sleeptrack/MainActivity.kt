@@ -242,9 +242,12 @@ private fun MainScreen(
     onSettings: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
-    val nano = rememberNano()
-    val currentYear = LocalDate.now().year
+    // Commentaires désactivés : ni client ML Kit, ni interrogation d'AICore.
+    val nano = if (display.ai) rememberNano() else null
+    val today = LocalDate.now()
+    val currentYear = today.year
     val scale = remember(metric, data) { scaleFor(metric, data) }
     val series = remember(metric, data) { data.series(metric) }
     val config = LocalConfiguration.current
@@ -264,7 +267,7 @@ private fun MainScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Sommeil", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { shareYearImage(context, year, metric, data) }) {
+            TextButton(onClick = { scope.launch { shareYearImage(context, year, metric, data) } }) {
                 Text("Partager", color = Palette.muted, fontSize = 14.sp)
             }
             TextButton(onClick = onSettings) {
@@ -330,13 +333,19 @@ private fun MainScreen(
         if (series.isEmpty()) {
             if (display.notes) EmptyNote("Aucune donnée « ${metric.label.lowercase()} » pour cette année.")
         } else {
+            // Mémorisées : toucher une case recompose l'écran, pas les chiffres. La date
+            // fait partie des clés, les tuiles « 7 derniers jours » et « série en cours » en
+            // dépendent.
             if (display.stats) {
-                val tiles = statTiles(metric, data, scale)
+                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale) }
                 StatRow(tiles[0], tiles[1])
                 StatRow(tiles[2], tiles[3])
             }
             if (display.streaks) {
-                streakTiles(metric, data, display.goalMinutes, year)?.let { (current, best) ->
+                val streaks = remember(metric, data, display.goalMinutes, year, today) {
+                    streakTiles(metric, data, display.goalMinutes, year, today)
+                }
+                streaks?.let { (current, best) ->
                     StatRow(current, best)
                     if (display.notes) {
                         targetFor(metric, display.goalMinutes)?.let { target ->
@@ -356,7 +365,7 @@ private fun MainScreen(
             Panel { CorrelationPanel(data, showNotes = display.notes) }
         }
 
-        if (display.ai) {
+        if (nano != null) {
             // Le commentaire vient après les chiffres : il les croise, il ne les annonce pas.
             if (nano.ready && series.isNotEmpty()) {
                 Panel { NanoComment(nano, metric, data, display.goalMinutes, year) }
