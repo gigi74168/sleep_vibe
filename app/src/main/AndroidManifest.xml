@@ -34,8 +34,11 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.SleepTrack">
 
+        <!-- Rotation et redimensionnement gérés par Compose, sans recréer l'activité : l'année,
+             la case choisie et les données restent, sans tout relire ni repasser par la roue. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -84,6 +87,19 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- EmojiCompat chargeait au démarrage une police d'émojis téléchargée (appel au
+             fournisseur de polices, puis la police en mémoire). L'app n'affiche aucun émoji :
+             son initialiseur est retiré, les autres (cycle de vie, profils) restent. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
 
         <!-- Partage de l'image : le fichier exporté, et rien d'autre -->
         <provider

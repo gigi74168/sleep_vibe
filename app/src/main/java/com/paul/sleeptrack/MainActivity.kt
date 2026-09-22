@@ -42,9 +42,9 @@ import java.time.LocalDate
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // À chaque lancement, mais pas à chaque rotation : l'activité recréée n'a rien à
-        // reposer. Un arrêt forcé annule les alarmes et ferme aussi l'activité, donc le
-        // lancement suivant repasse bien par ici.
+        // À chaque lancement, mais pas quand l'activité est seulement recréée (langue, thème,
+        // retour après la mort du processus) : il n'y a rien à reposer. Un arrêt forcé annule
+        // les alarmes et ferme aussi l'activité, donc le lancement suivant repasse par ici.
         if (savedInstanceState == null) {
             Reminders.reschedule(this)
             // Le modèle local a été retiré (résumé du dimanche en 2.7, le reste ensuite) : on
