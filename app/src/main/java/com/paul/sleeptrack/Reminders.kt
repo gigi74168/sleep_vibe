@@ -158,6 +158,8 @@ class ReminderReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             Reminders.reschedule(context)
+            // Redessiner le widget repose aussi son alarme de minuit, perdue au redémarrage.
+            updateAllWidgets(context)
             return
         }
         if (action != ACTION_EVENING && action != ACTION_WEEKLY) return

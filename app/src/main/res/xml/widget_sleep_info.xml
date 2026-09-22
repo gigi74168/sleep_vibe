@@ -3,6 +3,9 @@
   Taille par défaut 4x2, redimensionnable jusqu'à 2x1 (110dp = 2 colonnes, 40dp = 1 ligne,
   selon la formule 70*n - 30). Le rendu s'adapte : moins de semaines quand c'est étroit,
   et l'en-tête disparaît quand c'est trop plat pour lui.
+
+  updatePeriodMillis à 0 : un rafraîchissement périodique réveille le téléphone, alors que
+  l'image ne change qu'avec le cache ou la date. Voir SleepWidget.kt (alarme de minuit).
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
@@ -12,7 +15,7 @@
     android:targetCellWidth="4"
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="3600000"
+    android:updatePeriodMillis="0"
     android:widgetCategory="home_screen"
     android:description="@string/widget_description"
     android:initialLayout="@layout/widget_sleep"
