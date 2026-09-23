@@ -28,7 +28,7 @@ suspend fun shareYearImage(context: Context, year: Int, metric: Metric, data: He
     // Le rendu et l'encodage PNG bloqueraient l'interface, jusqu'à quelques secondes en
     // 4K : ils se font à côté, seul l'envoi du sélecteur revient sur le fil principal.
     val uri = withContext(Dispatchers.Default) {
-        val bitmap = renderYearCard(year, metric, data, quality.widthPx)
+        val bitmap = renderYearCard(year, metric, data, Prefs.goals(context), quality.widthPx)
         val file = try {
             writePng(context, bitmap, "sleeptrack-${metric.name.lowercase()}-$year.png")
         } finally {

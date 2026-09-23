@@ -45,15 +45,6 @@ object Palette {
         Color(0xFF2ECC71),
     )
 
-    // Le poids n'a pas de « bon » côté : dégradé neutre, du plus léger au plus lourd.
-    val weightRamp = listOf(
-        Color(0xFFA8E4F2),
-        Color(0xFF6FC3E0),
-        Color(0xFF4A95C7),
-        Color(0xFF3A6BA8),
-        Color(0xFF2E4685),
-    )
-
     val longDate: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
 }
 
@@ -154,6 +145,72 @@ fun YearHeatmap(
                                 drawRoundRect(Color.White, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bande des dernières semaines jusqu'à aujourd'hui, à toucher : calquée sur [YearHeatmap] mais
+ * sur une hauteur fixe, avec autant de semaines que la largeur en offre.
+ */
+@Composable
+fun RecentHeatmap(
+    selected: LocalDate?,
+    onSelect: (LocalDate?) -> Unit,
+    colorAt: (LocalDate) -> Color?,
+    height: Dp,
+    today: LocalDate = LocalDate.now(),
+) {
+    val currentOnSelect = rememberUpdatedState(onSelect)
+    val currentColorAt = rememberUpdatedState(colorAt)
+    val currentSelected = rememberUpdatedState(selected)
+    val lastMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+
+    BoxWithConstraints(Modifier.fillMaxWidth().height(height)) {
+        val pitch = height / 7
+        val weeks = (maxWidth / pitch).toInt().coerceAtLeast(1)
+        val gridStart = lastMonday.minusWeeks((weeks - 1).toLong())
+        val gridWidth = pitch * weeks
+        val cell = pitch * 0.82f
+
+        Canvas(
+            Modifier
+                .width(gridWidth)
+                .height(pitch * 7)
+                .pointerInput(weeks, pitch, gridStart) {
+                    detectTapGestures { pos ->
+                        val p = pitch.toPx()
+                        val col = (pos.x / p).toInt().coerceIn(0, weeks - 1)
+                        val row = (pos.y / p).toInt().coerceIn(0, 6)
+                        val day = gridStart.plusDays(col * 7L + row)
+                        if (!day.isAfter(today)) {
+                            currentOnSelect.value(if (day == currentSelected.value) null else day)
+                        }
+                    }
+                }
+        ) {
+            val p = pitch.toPx()
+            val s = cell.toPx()
+            val inset = (p - s) / 2
+            val radius = CornerRadius(s * 0.3f)
+            for (col in 0 until weeks) {
+                for (row in 0..6) {
+                    val day = gridStart.plusDays(col * 7L + row)
+                    if (day.isAfter(today)) continue
+                    val topLeft = Offset(col * p + inset, row * p + inset)
+                    drawRoundRect(currentColorAt.value(day) ?: Palette.empty, topLeft, Size(s, s), radius)
+                    // Repère discret sur aujourd'hui, pour savoir où on en est.
+                    if (day == today && day != selected) {
+                        drawRoundRect(
+                            Palette.muted, topLeft, Size(s, s), radius,
+                            style = Stroke(1.5.dp.toPx()),
+                        )
+                    }
+                    if (day == selected) {
+                        drawRoundRect(Color.White, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
                     }
                 }
             }

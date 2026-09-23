@@ -1,16 +1,13 @@
 package com.paul.sleeptrack
 
-import android.Manifest
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,7 +34,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.time.Duration
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
@@ -92,12 +88,23 @@ private fun SleepApp() {
     var year by remember { mutableIntStateOf(LocalDate.now().year) }
     var metric by remember { mutableStateOf(Prefs.lastMetric(context)) }
     var visibleMetrics by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
+    var goals by remember { mutableStateOf(Prefs.goals(context)) }
+    var recoveryConfig by remember { mutableStateOf(Prefs.recoveryConfig(context)) }
+    var home by remember { mutableStateOf(Prefs.home(context)) }
     var demo by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(Tab.HOME) }
+    var tab by remember {
+        mutableStateOf(runCatching { Tab.valueOf(Prefs.home(context).startTab) }.getOrDefault(Tab.HOME))
+    }
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
     val scope = rememberCoroutineScope()
+
+    // Ce que le score de récupération sert quelque part : son onglet, ou la carte d'accueil.
+    val recoveryShown = Metric.RECOVERY in visibleMetrics || home.card
+    val requested = remember(visibleMetrics, recoveryShown, recoveryConfig) {
+        requestedPermissions(visibleMetrics, recoveryShown, recoveryConfig)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -120,10 +127,13 @@ private fun SleepApp() {
 
     LaunchedEffect(year, demo, refreshKey) {
         val today = LocalDate.now()
+        val config = Prefs.recoveryConfig(context)
         // L'année est découpée dans tout l'historique, pas lue seule : les scores de
         // récupération de janvier gardent ainsi leur ligne de base de décembre.
-        fun ready(all: HealthData, missing: Set<String>) =
-            UiState.Ready(all.filterYear(year), all.since(today.minusDays(RECENT_DAYS)), missing)
+        fun ready(all: HealthData, missing: Set<String>): UiState.Ready {
+            val scored = all.withRecovery(config)
+            return UiState.Ready(scored.filterYear(year), scored.since(today.minusDays(RECENT_DAYS)), missing)
+        }
 
         if (demo) {
             val all = setOf(year - 1, year, today.year - 1, today.year)
@@ -146,7 +156,7 @@ private fun SleepApp() {
         val client = HealthConnectClient.getOrCreate(context)
         state = try {
             val granted = client.permissionController.getGrantedPermissions()
-            if (DATA_PERMISSIONS.values.none { it in granted }) {
+            if (DATA_PERMISSIONS.keys.none { it in granted }) {
                 if (archived.isEmpty()) {
                     UiState.NeedsPermission
                 } else {
@@ -156,7 +166,7 @@ private fun SleepApp() {
                 // Quelques semaines avant le 1er janvier : la ligne de base de la récupération.
                 val fresh = loadHealthData(
                     client, granted,
-                    LocalDate.of(year, 1, 1).minusDays(RECOVERY_BASELINE_DAYS + 7L),
+                    LocalDate.of(year, 1, 1).minusDays(BASELINE_CHOICES.max() + 7L),
                     LocalDate.of(year, 12, 31),
                 )
                 val all = withContext(Dispatchers.IO) {
@@ -183,7 +193,10 @@ private fun SleepApp() {
         if (tab == Tab.SETTINGS && next != Tab.SETTINGS) {
             visibleMetrics = Prefs.visibleMetrics(context)
             display = Prefs.display(context)
-            if (metric !in visibleMetrics) metric = Metric.SLEEP
+            goals = Prefs.goals(context)
+            recoveryConfig = Prefs.recoveryConfig(context)
+            home = Prefs.home(context)
+            if (metric !in visibleMetrics) metric = visibleMetrics.first()
             // Dessiné hors du fil de l'interface : le changement d'onglet n'attend pas le
             // rendu des images du widget.
             val app = context.applicationContext
@@ -226,11 +239,11 @@ private fun SleepApp() {
                 )
                 UiState.NeedsPermission -> Message(
                     title = "Accès à tes données de santé",
-                    body = "Sleep Track lit tes nuits, tes pas, ton cœur au repos, ta variabilité cardiaque " +
-                        "et ton poids dans Health Connect pour dessiner tes grilles et calculer ta " +
-                        "récupération. Rien ne quitte ton téléphone.",
+                    body = "Sleep Track lit tes nuits, tes pas et ta variabilité cardiaque dans " +
+                        "Health Connect pour dessiner tes grilles et calculer ta récupération. " +
+                        "Rien ne quitte ton téléphone.",
                     action = "Autoriser l'accès",
-                    onAction = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
+                    onAction = { permissionLauncher.launch(requested) },
                     onDemo = { demo = true },
                 )
                 is UiState.Error -> Message(
@@ -244,7 +257,10 @@ private fun SleepApp() {
                     Tab.HOME -> HomeScreen(
                         recent = s.recent,
                         visibleMetrics = visibleMetrics,
-                        missingHrv = PERMISSION_READ_HRV in s.missing && !demo,
+                        goals = goals,
+                        home = home,
+                        missingHrv = PERMISSION_READ_HRV in s.missing && !demo &&
+                            RecoveryComponent.HRV in recoveryConfig.components,
                         showNotes = display.notes,
                         demo = demo,
                         onOpenMetric = {
@@ -252,23 +268,26 @@ private fun SleepApp() {
                             Prefs.setLastMetric(context, it)
                             selectTab(Tab.GRIDS)
                         },
-                        onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
+                        onRequestPermissions = { permissionLauncher.launch(requested) },
                         onExitDemo = { demo = false },
+                        onPersonalize = { selectTab(Tab.SETTINGS) },
                     )
                     Tab.GRIDS -> MainScreen(
                         year = year,
                         metric = metric,
                         visibleMetrics = visibleMetrics,
+                        goals = goals,
                         display = display,
                         data = s.data,
                         missing = s.missing,
+                        requested = requested,
                         demo = demo,
                         onYear = { year = it },
                         onMetric = {
                             metric = it
                             Prefs.setLastMetric(context, it)
                         },
-                        onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
+                        onRequestPermissions = { permissionLauncher.launch(requested) },
                         onExitDemo = { demo = false },
                     )
                     Tab.SETTINGS -> SettingsScreen(data = s.data)
@@ -312,9 +331,11 @@ private fun MainScreen(
     year: Int,
     metric: Metric,
     visibleMetrics: List<Metric>,
+    goals: Goals,
     display: DisplayPrefs,
     data: HealthData,
     missing: Set<String>,
+    requested: Set<String>,
     demo: Boolean,
     onYear: (Int) -> Unit,
     onMetric: (Metric) -> Unit,
@@ -326,7 +347,7 @@ private fun MainScreen(
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
     val today = LocalDate.now()
     val currentYear = today.year
-    val scale = remember(metric, data) { scaleFor(metric, data) }
+    val scale = remember(metric, goals) { scaleFor(metric, goals) }
     val series = remember(metric, data) { data.series(metric) }
     val config = LocalConfiguration.current
     // À l'horizontale, l'écran est large et court : on donne aux cases la hauteur
@@ -345,35 +366,37 @@ private fun MainScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Grilles", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Box {
-                var shareMenu by remember { mutableStateOf(false) }
-                // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
-                var sharing by remember { mutableStateOf(false) }
-                TextButton(onClick = { shareMenu = true }) {
-                    Text("Partager", color = Palette.muted, fontSize = 14.sp)
-                }
-                DropdownMenu(
-                    expanded = shareMenu,
-                    onDismissRequest = { shareMenu = false },
-                    containerColor = Palette.card,
-                ) {
-                    ShareQuality.entries.forEach { quality ->
-                        DropdownMenuItem(
-                            text = { Text(quality.label, color = Palette.text) },
-                            onClick = {
-                                shareMenu = false
-                                if (!sharing) {
-                                    sharing = true
-                                    scope.launch {
-                                        try {
-                                            shareYearImage(context, year, metric, data, quality)
-                                        } finally {
-                                            sharing = false
+            if (display.showShare) {
+                Box {
+                    var shareMenu by remember { mutableStateOf(false) }
+                    // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
+                    var sharing by remember { mutableStateOf(false) }
+                    TextButton(onClick = { shareMenu = true }) {
+                        Text("Partager", color = Palette.muted, fontSize = 14.sp)
+                    }
+                    DropdownMenu(
+                        expanded = shareMenu,
+                        onDismissRequest = { shareMenu = false },
+                        containerColor = Palette.card,
+                    ) {
+                        ShareQuality.entries.forEach { quality ->
+                            DropdownMenuItem(
+                                text = { Text(quality.label, color = Palette.text) },
+                                onClick = {
+                                    shareMenu = false
+                                    if (!sharing) {
+                                        sharing = true
+                                        scope.launch {
+                                            try {
+                                                shareYearImage(context, year, metric, data, quality)
+                                            } finally {
+                                                sharing = false
+                                            }
                                         }
                                     }
-                                }
-                            },
-                        )
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -403,7 +426,9 @@ private fun MainScreen(
             }
         }
 
-        selected?.let { day -> DayDetail(day, metric, data, visibleMetrics) }
+        if (display.dayDetail) {
+            selected?.let { day -> DayDetail(day, data, visibleMetrics, goals) }
+        }
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
@@ -436,18 +461,18 @@ private fun MainScreen(
             // fait partie des clés, les tuiles « 7 derniers jours » et « série en cours » en
             // dépendent.
             if (display.stats) {
-                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale) }
+                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale, goals) }
                 StatRow(tiles[0], tiles[1])
                 StatRow(tiles[2], tiles[3])
             }
             if (display.streaks) {
-                val streaks = remember(metric, data, display.goalMinutes, year, today) {
-                    streakTiles(metric, data, display.goalMinutes, year, today)
+                val streaks = remember(metric, data, goals, year, today) {
+                    streakTiles(metric, data, goals, year, today)
                 }
                 streaks?.let { (current, best) ->
                     StatRow(current, best)
                     if (display.notes) {
-                        targetFor(metric, display.goalMinutes)?.let { target ->
+                        targetFor(metric, goals).let { target ->
                             EmptyNote("Séries de ${target.label} ; un jour sans donnée la coupe.")
                         }
                     }
@@ -464,9 +489,7 @@ private fun MainScreen(
             Panel { CorrelationPanel(data, showNotes = display.notes) }
         }
 
-        val relevantMissing = remember(missing, visibleMetrics) {
-            requestedPermissions(visibleMetrics).intersect(missing)
-        }
+        val relevantMissing = remember(missing, requested) { requested.intersect(missing) }
         if (relevantMissing.isNotEmpty() && !demo) {
             Panel {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -481,10 +504,7 @@ private fun MainScreen(
 }
 
 private fun missingText(missing: Set<String>): String {
-    val parts = DATA_PERMISSIONS.filterValues { it in missing }.keys.map {
-        // La récupération se calcule ; ce qui manque, c'est la VFC qu'elle utilise.
-        if (it == Metric.RECOVERY) "la variabilité cardiaque" else it.detailLabel.lowercase()
-    }
+    val parts = DATA_PERMISSIONS.filterKeys { it in missing }.values.toList()
     val extras = buildList {
         if (PERMISSION_READ_HISTORY in missing) add("l'historique au-delà de 30 jours")
         if (PERMISSION_READ_BACKGROUND in missing) add("la lecture en arrière-plan (widget et rappels)")
@@ -501,7 +521,7 @@ private fun missingText(missing: Set<String>): String {
 }
 
 @Composable
-private fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metric) -> Unit) {
+internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metric) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -540,7 +560,7 @@ private fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metri
 }
 
 @Composable
-private fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
     TextButton(
         onClick = onClick,
         enabled = enabled,
@@ -561,7 +581,7 @@ internal fun Panel(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun DayDetail(day: LocalDate, metric: Metric, data: HealthData, visibleMetrics: List<Metric>) {
+internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Metric>, goals: Goals) {
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -574,13 +594,13 @@ private fun DayDetail(day: LocalDate, metric: Metric, data: HealthData, visibleM
                 DetailLine(
                     entry.detailLabel,
                     value?.let(entry::format) ?: "Aucune donnée",
-                    value?.let { scaleFor(entry, data).colorOf(it) },
+                    value?.let { scaleFor(entry, goals).colorOf(it) },
                 )
             }
-            if (metric == Metric.RECOVERY) {
+            if (Metric.RECOVERY in visibleMetrics) {
                 data.recovery[day]?.let { score ->
                     Text("Détail de la récupération", color = Palette.muted, fontSize = 12.sp)
-                    RecoveryBreakdown(day, score, data)
+                    RecoveryBreakdown(day, score, data, goals)
                 }
             }
         }
@@ -634,406 +654,5 @@ private fun Message(title: String, body: String, action: String, onAction: () ->
             colors = ButtonDefaults.buttonColors(containerColor = Palette.levels.last(), contentColor = Palette.bg),
         ) { Text(action) }
         TextButton(onClick = onDemo) { Text("Voir une démo", color = Palette.muted) }
-    }
-}
-
-// ---------------------------------------------------------------- Réglages
-
-/** Marqueur : la demande d'autorisation en cours vient du bouton d'exemple. */
-private const val SAMPLE = "sample"
-
-@Composable
-private fun SettingsScreen(data: HealthData) {
-    val context = LocalContext.current
-    var evening by remember { mutableStateOf(Prefs.eveningEnabled(context)) }
-    var eveningHour by remember { mutableIntStateOf(Prefs.eveningHour(context)) }
-    var weekly by remember { mutableStateOf(Prefs.weeklyEnabled(context)) }
-    var weeklyHour by remember { mutableIntStateOf(Prefs.weeklyHour(context)) }
-    var goal by remember { mutableIntStateOf(Prefs.goalMinutes(context)) }
-    var pendingSwitch by remember { mutableStateOf<String?>(null) }
-    var visible by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
-    var widgetMetric by remember { mutableStateOf(Prefs.widgetMetric(context)) }
-    var display by remember { mutableStateOf(Prefs.display(context)) }
-    var backupStatus by remember { mutableStateOf<String?>(null) }
-    var confirmClear by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            backupStatus = runCatching {
-                withContext(Dispatchers.IO) {
-                    // On verse d'abord l'année affichée dans l'archive : l'export porte
-                    // alors tout ce que l'app connaît, pas seulement l'écran ouvert.
-                    exportBackup(context, uri, Archive.merge(context, data))
-                }
-            }.fold(
-                { "Exporté : $it jours dans le fichier choisi." },
-                { "Export impossible (${it.message ?: "erreur inconnue"})." },
-            )
-        }
-    }
-
-    val csvLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            backupStatus = runCatching {
-                withContext(Dispatchers.IO) {
-                    exportCsv(context, uri, Archive.merge(context, data))
-                }
-            }.fold(
-                { "Exporté : $it jours en CSV." },
-                { "Export impossible (${it.message ?: "erreur inconnue"})." },
-            )
-        }
-    }
-
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            backupStatus = runCatching {
-                withContext(Dispatchers.IO) {
-                    val imported = importBackup(context, uri)
-                    Archive.merge(context, imported)
-                    // Les jours récents relus dans Android reprennent la main sur ceux du
-                    // fichier dès le retour à l'écran principal, comme avant.
-                    forgetScreenTimeSync(context)
-                    dayCount(imported)
-                }
-            }.fold(
-                { days ->
-                    if (days == 0) {
-                        "Aucun jour reconnu dans ce fichier."
-                    } else {
-                        "Importé : $days jours ajoutés à l'historique."
-                    }
-                },
-                { "Import impossible (${it.message ?: "fichier illisible"})." },
-            )
-        }
-    }
-
-    fun persist() {
-        Prefs.of(context).edit()
-            .putBoolean(Prefs.EVENING_ENABLED, evening)
-            .putInt(Prefs.EVENING_HOUR, eveningHour)
-            .putBoolean(Prefs.WEEKLY_ENABLED, weekly)
-            .putInt(Prefs.WEEKLY_HOUR, weeklyHour)
-            .putInt(Prefs.GOAL_MINUTES, goal)
-            .apply()
-        Reminders.reschedule(context)
-    }
-
-    fun sampleWeekly() {
-        val message = Reminders.weeklyMessage(data)
-            ?: ("Ta semaine" to "Pas encore assez de nuits enregistrées pour un résumé.")
-        Reminders.notify(
-            context, Reminders.NOTIFICATION_SAMPLE, Reminders.CHANNEL_WEEKLY,
-            "Résumé hebdomadaire", message.first, message.second,
-        )
-    }
-
-    val notificationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            when (pendingSwitch) {
-                Prefs.EVENING_ENABLED -> evening = true
-                Prefs.WEEKLY_ENABLED -> weekly = true
-                SAMPLE -> sampleWeekly()
-            }
-            persist()
-        }
-        pendingSwitch = null
-    }
-
-    // Activer un rappel sans pouvoir notifier ne servirait à rien : on demande d'abord.
-    fun enable(key: String, turnOn: Boolean, apply: (Boolean) -> Unit) {
-        if (turnOn && !Reminders.canNotify(context) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pendingSwitch = key
-            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            return
-        }
-        apply(turnOn)
-        persist()
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Réglages", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SettingSwitch(
-                    title = "Rappel du soir",
-                    subtitle = "Si la moyenne des 7 derniers jours passe sous l'objectif",
-                    checked = evening,
-                    onChange = { enable(Prefs.EVENING_ENABLED, it) { v -> evening = v } },
-                )
-                if (evening) {
-                    Stepper("Heure", "%02dh00".format(eveningHour)) { step ->
-                        eveningHour = (eveningHour + step + 24) % 24
-                        persist()
-                    }
-                }
-                Stepper("Objectif de sommeil", formatDuration(Duration.ofMinutes(goal.toLong()))) { step ->
-                    goal = (goal + step * 15).coerceIn(300, 600)
-                    persist()
-                }
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SettingSwitch(
-                    title = "Résumé du dimanche",
-                    subtitle = "Moyenne de la semaine, comparée à la précédente",
-                    checked = weekly,
-                    onChange = { enable(Prefs.WEEKLY_ENABLED, it) { v -> weekly = v } },
-                )
-                if (weekly) {
-                    Stepper("Heure", "%02dh00".format(weeklyHour)) { step ->
-                        weeklyHour = (weeklyHour + step + 24) % 24
-                        persist()
-                    }
-                }
-                OutlinedButton(onClick = {
-                    if (Reminders.canNotify(context)) {
-                        sampleWeekly()
-                    } else {
-                        pendingSwitch = SAMPLE
-                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                }) {
-                    Text("Voir un exemple de résumé", color = Palette.text)
-                }
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Métriques affichées", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Masquer une métrique la retire des onglets, du détail d'une journée " +
-                        "et des autorisations réclamées.",
-                    color = Palette.muted,
-                    fontSize = 12.sp,
-                )
-                Metric.entries.filter { it.canHide }.forEach { entry ->
-                    SettingSwitch(
-                        title = entry.detailLabel,
-                        subtitle = when (entry) {
-                            Metric.STEPS -> "Masquer retire aussi le panneau « activité et sommeil »"
-                            Metric.SCREEN -> "Lu dans Android, pas dans Health Connect"
-                            else -> "Visible dans le menu principal"
-                        },
-                        checked = entry in visible,
-                        onChange = { on ->
-                            Prefs.setVisible(context, entry, on)
-                            visible = Prefs.visibleMetrics(context)
-                            widgetMetric = Prefs.widgetMetric(context)
-                        },
-                    )
-                }
-                Text(
-                    "Le sommeil reste toujours affiché : c'est le sujet de l'app.",
-                    color = Palette.muted.copy(alpha = 0.7f),
-                    fontSize = 11.sp,
-                )
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Widget", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Ce que le widget affiche. Ajoute « Sleep Track » depuis l'écran des widgets ; " +
-                        "il se redimensionne de 4x2 jusqu'à 2x1.",
-                    color = Palette.muted,
-                    fontSize = 13.sp,
-                )
-                MetricSwitch(widgetMetric, visible) {
-                    widgetMetric = it
-                    Prefs.setWidgetMetric(context, it)
-                    updateAllWidgets(context)
-                }
-                OutlinedButton(onClick = { updateAllWidgets(context) }) {
-                    Text("Rafraîchir le widget", color = Palette.text)
-                }
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Affichage", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                SettingSwitch(
-                    title = "Statistiques",
-                    subtitle = "Les quatre tuiles chiffrées sous la grille",
-                    checked = display.stats,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_STATS, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Séries",
-                    subtitle = "Jours consécutifs au-dessus de l'objectif, et record de l'année",
-                    checked = display.streaks,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_STREAKS, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Semaine type",
-                    subtitle = "La moyenne de chaque jour de la semaine",
-                    checked = display.week,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_WEEK, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Légende des couleurs",
-                    subtitle = "La bande de repères au bas de la grille",
-                    checked = display.legend,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_LEGEND, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Activité et sommeil",
-                    subtitle = "Le nuage de points et la corrélation",
-                    checked = display.correlation,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_CORRELATION, on)
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Commentaires",
-                    subtitle = "Les petites phrases grises qui expliquent les panneaux",
-                    checked = display.notes,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.SHOW_NOTES, on)
-                    display = Prefs.display(context)
-                }
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Taille de la grille", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                val sizeIndex = Prefs.CELL_SIZES.indexOf(display.cellSize).coerceAtLeast(0)
-                Stepper("Taille des cases", Prefs.CELL_LABELS[sizeIndex]) { step ->
-                    val next = (sizeIndex + step).coerceIn(0, Prefs.CELL_SIZES.lastIndex)
-                    Prefs.setCellSize(context, Prefs.CELL_SIZES[next])
-                    display = Prefs.display(context)
-                }
-                SettingSwitch(
-                    title = "Agrandir en paysage",
-                    subtitle = "Cases à la hauteur de l'écran quand le téléphone est à l'horizontale",
-                    checked = display.landscapeBig,
-                ) { on ->
-                    Prefs.setFlag(context, Prefs.LANDSCAPE_BIG, on)
-                    display = Prefs.display(context)
-                }
-                Text(
-                    "Quand les cases ne tiennent plus dans la largeur, la grille défile " +
-                        "latéralement ; la colonne des jours, elle, reste en place.",
-                    color = Palette.muted,
-                    fontSize = 12.sp,
-                )
-            }
-        }
-
-        Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Sauvegarde", color = Palette.text, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Un fichier JSON lisible tel quel : une ligne par jour, avec minutes de " +
-                        "sommeil, pas, cœur au repos, poids, écran et VFC. Le score de récupération " +
-                        "n'y est pas : il se recalcule. L'app garde son propre historique, " +
-                        "que l'export emporte en entier et que l'import complète sans rien écraser.",
-                    color = Palette.muted,
-                    fontSize = 13.sp,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            backupStatus = null
-                            exportLauncher.launch("sleeptrack-${LocalDate.now()}.json")
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Exporter", color = Palette.text) }
-                    OutlinedButton(
-                        onClick = {
-                            backupStatus = null
-                            importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Importer", color = Palette.text) }
-                }
-                TextButton(onClick = {
-                    backupStatus = null
-                    csvLauncher.launch("sleeptrack-${LocalDate.now()}.csv")
-                }) {
-                    Text("Exporter en CSV (pour un tableur)", color = Palette.muted, fontSize = 13.sp)
-                }
-                backupStatus?.let { Text(it, color = Palette.levels[3], fontSize = 13.sp) }
-                TextButton(onClick = {
-                    if (confirmClear) {
-                        Archive.clear(context)
-                        confirmClear = false
-                        backupStatus = "Historique local effacé. Health Connect n'est pas touché."
-                    } else {
-                        confirmClear = true
-                    }
-                }) {
-                    Text(
-                        if (confirmClear) "Confirmer l'effacement" else "Effacer l'historique local",
-                        color = if (confirmClear) Palette.levels[0] else Palette.muted,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-        }
-
-        Text(
-            "Tout est calculé et gardé sur le téléphone. Rien ne part ailleurs, sauf le " +
-                "fichier que tu exportes toi-même.",
-            color = Palette.muted.copy(alpha = 0.7f),
-            fontSize = 11.sp,
-        )
-    }
-}
-
-@Composable
-private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.text, fontSize = 15.sp)
-            Text(subtitle, color = Palette.muted, fontSize = 12.sp)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Palette.bg,
-                checkedTrackColor = Palette.levels.last(),
-            ),
-        )
-    }
-}
-
-@Composable
-private fun Stepper(label: String, value: String, onStep: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Palette.muted, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        ArrowButton("‹", enabled = true) { onStep(-1) }
-        Text(value, color = Palette.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        ArrowButton("›", enabled = true) { onStep(1) }
     }
 }

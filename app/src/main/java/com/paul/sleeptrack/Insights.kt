@@ -18,19 +18,18 @@ import java.util.Locale
 
 // --------------------------------------------------------------------- Séries
 
-/** Ce qui compte comme une bonne journée. Le seuil du sommeil est celui des réglages. */
+/** Ce qui compte comme une bonne journée : les objectifs des réglages. */
 data class Target(val label: String, val good: (Double) -> Boolean)
 
-fun targetFor(metric: Metric, goalMinutes: Int): Target? = when (metric) {
+fun targetFor(metric: Metric, goals: Goals): Target = when (metric) {
     Metric.SLEEP -> Target(
-        "nuits d'au moins ${formatDuration(Duration.ofMinutes(goalMinutes.toLong()))}"
-    ) { it >= goalMinutes }
-    Metric.RECOVERY -> Target("journées au vert ($RECOVERY_GOOD ou plus)") { it >= RECOVERY_GOOD }
-    Metric.STEPS -> Target("journées à 10 000 pas ou plus") { it >= 10_000 }
-    Metric.HEART -> Target("journées à 58 bpm ou moins") { it <= 58 }
-    Metric.SCREEN -> Target("journées sous 3h d'écran") { it < 180 }
-    // Le poids n'a pas de « bon » côté : une série n'y voudrait rien dire.
-    Metric.WEIGHT -> null
+        "nuits d'au moins ${formatDuration(Duration.ofMinutes(goals.sleepMinutes.toLong()))}"
+    ) { it >= goals.sleepMinutes }
+    Metric.RECOVERY -> Target("journées au vert (${goals.recoveryGood} ou plus)") { it >= goals.recoveryGood }
+    Metric.STEPS -> Target("journées à ${formatSteps(goals.steps.toLong())} pas ou plus") { it >= goals.steps }
+    Metric.SCREEN -> Target(
+        "journées sous ${formatDuration(Duration.ofMinutes(goals.screenMinutes.toLong()))} d'écran"
+    ) { it < goals.screenMinutes }
 }
 
 data class Streaks(val current: Int, val best: Int, val reached: Int)
@@ -63,18 +62,15 @@ fun streaksOf(series: Map<LocalDate, Double>, good: (Double) -> Boolean, today: 
     return Streaks(current, best, days.size)
 }
 
-/**
- * Les deux tuiles de série, ou null si la métrique ne s'y prête pas (le poids) ou si
- * l'année n'a pas encore de quoi dire quelque chose.
- */
+/** Les deux tuiles de série, ou null si l'année n'a pas encore de quoi dire quelque chose. */
 fun streakTiles(
     metric: Metric,
     data: HealthData,
-    goalMinutes: Int,
+    goals: Goals,
     year: Int,
     today: LocalDate = LocalDate.now(),
 ): Pair<StatTile, StatTile>? {
-    val target = targetFor(metric, goalMinutes) ?: return null
+    val target = targetFor(metric, goals)
     val series = data.series(metric)
     if (series.size < 7) return null
     val streaks = streaksOf(series, target.good, today)
@@ -201,11 +197,8 @@ private fun weekSentence(
         }
         Metric.RECOVERY -> "Tu récupères le mieux le $high ($highText), le moins bien le $low ($lowText)."
         Metric.STEPS -> "Tu marches le plus le $high ($highText) et le moins le $low ($lowText)."
-        Metric.HEART -> "Ton cœur au repos est au plus bas le $low ($lowText) et au plus haut " +
-            "le $high ($highText)."
         Metric.SCREEN -> "Tu passes le plus de temps sur ton écran le $high ($highText), le moins " +
             "le $low ($lowText)."
-        Metric.WEIGHT -> "Tu es au plus léger le $low ($lowText) et au plus lourd le $high ($highText)."
     }
 }
 
@@ -217,7 +210,5 @@ private fun compactValue(metric: Metric, value: Double): String = when (metric) 
     Metric.SLEEP -> formatDuration(Duration.ofMinutes(value.toLong()))
     Metric.RECOVERY -> "%.0f".format(value)
     Metric.STEPS -> if (value >= 1_000) "%.1fk".format(Locale.FRENCH, value / 1_000) else "%.0f".format(value)
-    Metric.HEART -> "%.0f".format(value)
-    Metric.WEIGHT -> "%.1f".format(Locale.FRENCH, value)
     Metric.SCREEN -> formatDuration(Duration.ofMinutes(value.toLong()))
 }

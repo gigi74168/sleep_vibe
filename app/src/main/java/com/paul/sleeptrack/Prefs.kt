@@ -8,7 +8,7 @@ import java.io.File
 import java.time.Duration
 import java.time.LocalDate
 
-/** Réglages de l'app : rappels, objectif, métriques visibles, métrique du widget. */
+/** Réglages de l'app : rappels, objectifs, récupération, accueil, métriques visibles, widget. */
 object Prefs {
     private const val FILE = "sommeil"
 
@@ -17,6 +17,9 @@ object Prefs {
     const val WEEKLY_ENABLED = "weekly_enabled"
     const val WEEKLY_HOUR = "weekly_hour"
     const val GOAL_MINUTES = "goal_minutes"
+    const val GOAL_STEPS = "goal_steps"
+    const val GOAL_SCREEN = "goal_screen"
+    const val GOAL_RECOVERY = "goal_recovery"
     const val WIDGET_METRIC = "widget_metric"
     const val HIDDEN_METRICS = "hidden_metrics"
     const val LAST_METRIC = "last_metric"
@@ -26,18 +29,39 @@ object Prefs {
     const val SHOW_LEGEND = "show_legend"
     const val SHOW_CORRELATION = "show_correlation"
     const val SHOW_NOTES = "show_notes"
+    const val SHOW_DAY_DETAIL = "show_day_detail"
+    const val SHOW_SHARE = "show_share"
     const val CELL_SIZE = "cell_size"
     const val LANDSCAPE_BIG = "landscape_big"
     /** Jour (et fuseau) de la dernière lecture du temps d'écran. */
     const val SCREEN_SYNCED = "screen_synced"
 
+    const val REC_SLEEP = "rec_sleep"
+    const val REC_HRV = "rec_hrv"
+    const val REC_LOAD = "rec_load"
+    const val BASELINE_DAYS = "baseline_days"
+
+    const val HOME_CARD = "home_card"
+    const val HOME_GAUGE = "home_gauge"
+    const val HOME_BREAKDOWN = "home_breakdown"
+    const val HOME_STRIPS = "home_strips"
+    const val HOME_STRIP_SIZE = "home_strip_size"
+    const val HOME_TAP_DETAIL = "home_tap_detail"
+    const val START_TAB = "start_tab"
+
     const val DEFAULT_EVENING_HOUR = 22
     const val DEFAULT_WEEKLY_HOUR = 19
-    const val DEFAULT_GOAL_MINUTES = 420
+    const val DEFAULT_GOAL_MINUTES = Goals.DEFAULT_SLEEP_MINUTES
 
     /** Côté d'une case, en dp. 0 = la grille s'ajuste à la largeur de l'écran. */
     val CELL_SIZES = listOf(0, 13, 18, 24)
     val CELL_LABELS = listOf("Ajustée", "Moyenne", "Grande", "Très grande")
+
+    /** Hauteur d'une bande de l'accueil, en dp. */
+    val STRIP_SIZES = listOf(100, 140, 180)
+    val STRIP_SIZE_LABELS = listOf("Compacte", "Normale", "Grande")
+
+    private val DEFAULT_HOME_STRIPS = setOf(Metric.SLEEP, Metric.STEPS, Metric.RECOVERY)
 
     fun of(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -46,8 +70,83 @@ object Prefs {
     fun eveningHour(context: Context) = of(context).getInt(EVENING_HOUR, DEFAULT_EVENING_HOUR)
     fun weeklyEnabled(context: Context) = of(context).getBoolean(WEEKLY_ENABLED, false)
     fun weeklyHour(context: Context) = of(context).getInt(WEEKLY_HOUR, DEFAULT_WEEKLY_HOUR)
-    fun goalMinutes(context: Context) = of(context).getInt(GOAL_MINUTES, DEFAULT_GOAL_MINUTES)
-    fun goal(context: Context): Duration = Duration.ofMinutes(goalMinutes(context).toLong())
+
+    /** Objectif de sommeil comme durée, pour les rappels. */
+    fun goal(context: Context): Duration = Duration.ofMinutes(goals(context).sleepMinutes.toLong())
+
+    /** Les quatre objectifs réglables : ils pilotent aussi les couleurs des grilles. */
+    fun goals(context: Context): Goals = of(context).let {
+        Goals(
+            sleepMinutes = it.getInt(GOAL_MINUTES, Goals.DEFAULT_SLEEP_MINUTES),
+            steps = it.getInt(GOAL_STEPS, Goals.DEFAULT_STEPS),
+            screenMinutes = it.getInt(GOAL_SCREEN, Goals.DEFAULT_SCREEN_MINUTES),
+            recoveryGood = it.getInt(GOAL_RECOVERY, Goals.DEFAULT_RECOVERY_GOOD),
+        )
+    }
+
+    fun setGoal(context: Context, key: String, value: Int) {
+        of(context).edit().putInt(key, value).apply()
+    }
+
+    /** Ce qui entre dans le score de récupération, et sa période de référence. */
+    fun recoveryConfig(context: Context): RecoveryConfig {
+        val p = of(context)
+        val components = buildSet {
+            if (p.getBoolean(REC_SLEEP, true)) add(RecoveryComponent.SLEEP)
+            if (p.getBoolean(REC_HRV, true)) add(RecoveryComponent.HRV)
+            if (p.getBoolean(REC_LOAD, true)) add(RecoveryComponent.LOAD)
+        }
+        return RecoveryConfig(
+            components = components,
+            baselineDays = p.getInt(BASELINE_DAYS, DEFAULT_BASELINE_DAYS),
+            sleepGoalMinutes = goals(context).sleepMinutes,
+        )
+    }
+
+    fun setRecoveryComponent(context: Context, component: RecoveryComponent, enabled: Boolean) {
+        val key = when (component) {
+            RecoveryComponent.SLEEP -> REC_SLEEP
+            RecoveryComponent.HRV -> REC_HRV
+            RecoveryComponent.LOAD -> REC_LOAD
+        }
+        of(context).edit().putBoolean(key, enabled).apply()
+    }
+
+    fun setBaselineDays(context: Context, days: Int) {
+        of(context).edit().putInt(BASELINE_DAYS, days).apply()
+    }
+
+    /** Ce que l'accueil montre : carte de récupération, bandes récentes, toucher des cases. */
+    fun home(context: Context): HomePrefs = of(context).let {
+        HomePrefs(
+            card = it.getBoolean(HOME_CARD, true),
+            gauge = it.getBoolean(HOME_GAUGE, true),
+            breakdown = it.getBoolean(HOME_BREAKDOWN, true),
+            strips = it.getStringSet(HOME_STRIPS, null)
+                ?.mapNotNull { name -> runCatching { Metric.valueOf(name) }.getOrNull() }
+                ?.toSet()
+                ?: DEFAULT_HOME_STRIPS,
+            stripSize = it.getInt(HOME_STRIP_SIZE, 1).coerceIn(0, STRIP_SIZES.lastIndex),
+            tapDetail = it.getBoolean(HOME_TAP_DETAIL, true),
+            startTab = it.getString(START_TAB, "HOME") ?: "HOME",
+        )
+    }
+
+    fun setHomeFlag(context: Context, key: String, value: Boolean) {
+        of(context).edit().putBoolean(key, value).apply()
+    }
+
+    fun setHomeStrips(context: Context, strips: Set<Metric>) {
+        of(context).edit().putStringSet(HOME_STRIPS, strips.map { it.name }.toSet()).apply()
+    }
+
+    fun setHomeStripSize(context: Context, index: Int) {
+        of(context).edit().putInt(HOME_STRIP_SIZE, index.coerceIn(0, STRIP_SIZES.lastIndex)).apply()
+    }
+
+    fun setStartTab(context: Context, tab: String) {
+        of(context).edit().putString(START_TAB, tab).apply()
+    }
 
     /** Ce que l'écran principal montre autour de la grille. */
     fun display(context: Context): DisplayPrefs = of(context).let {
@@ -60,7 +159,8 @@ object Prefs {
             notes = it.getBoolean(SHOW_NOTES, true),
             cellSize = it.getInt(CELL_SIZE, 0),
             landscapeBig = it.getBoolean(LANDSCAPE_BIG, true),
-            goalMinutes = it.getInt(GOAL_MINUTES, DEFAULT_GOAL_MINUTES),
+            dayDetail = it.getBoolean(SHOW_DAY_DETAIL, true),
+            showShare = it.getBoolean(SHOW_SHARE, true),
         )
     }
 
@@ -72,23 +172,27 @@ object Prefs {
         of(context).edit().putInt(CELL_SIZE, dp).apply()
     }
 
-    /** Les métriques montrées dans l'app. Le sommeil ne se masque pas : c'est le sujet. */
+    /** Les métriques montrées dans l'app. Il en reste toujours au moins une. */
     fun visibleMetrics(context: Context): List<Metric> {
         val hidden = of(context).getStringSet(HIDDEN_METRICS, emptySet()).orEmpty()
-        return Metric.entries.filter { !it.canHide || it.name !in hidden }
+        val visible = Metric.entries.filter { it.name !in hidden }
+        return visible.ifEmpty { listOf(Metric.entries.first()) }
     }
 
     fun isVisible(context: Context, metric: Metric) = metric in visibleMetrics(context)
 
     fun setVisible(context: Context, metric: Metric, visible: Boolean) {
-        if (!metric.canHide) return
+        val current = visibleMetrics(context)
+        // Le dernier interrupteur allumé ne peut pas s'éteindre : il faut au moins une métrique.
+        if (!visible && current.size <= 1 && metric in current) return
         val hidden = of(context).getStringSet(HIDDEN_METRICS, emptySet()).orEmpty().toMutableSet()
         if (visible) hidden -= metric.name else hidden += metric.name
         of(context).edit().putStringSet(HIDDEN_METRICS, hidden).apply()
         // Une métrique masquée ne peut plus être ni l'onglet ouvert, ni celle du widget.
         if (!visible) {
-            if (widgetMetric(context) == metric) setWidgetMetric(context, Metric.SLEEP)
-            if (lastMetric(context) == metric) setLastMetric(context, Metric.SLEEP)
+            val fallback = visibleMetrics(context).first()
+            if (widgetMetric(context) == metric) setWidgetMetric(context, fallback)
+            if (lastMetric(context) == metric) setLastMetric(context, fallback)
         }
     }
 
@@ -107,9 +211,19 @@ object Prefs {
     }
 
     private fun storedMetric(context: Context, key: String): Metric {
-        val stored = runCatching { Metric.valueOf(of(context).getString(key, null) ?: "") }
-            .getOrDefault(Metric.SLEEP)
-        return if (isVisible(context, stored)) stored else Metric.SLEEP
+        val visible = visibleMetrics(context)
+        val stored = runCatching { Metric.valueOf(of(context).getString(key, null) ?: "") }.getOrNull()
+        return if (stored != null && stored in visible) stored else visible.first()
+    }
+
+    /** Efface tous les réglages, sauf la synchronisation du temps d'écran. Ne touche aux données. */
+    fun resetSettings(context: Context) {
+        val prefs = of(context)
+        val synced = prefs.getString(SCREEN_SYNCED, null)
+        val editor = prefs.edit().clear()
+        if (synced != null) editor.putString(SCREEN_SYNCED, synced)
+        editor.apply()
+        Reminders.reschedule(context)
     }
 }
 
@@ -123,8 +237,19 @@ data class DisplayPrefs(
     val notes: Boolean = true,
     val cellSize: Int = 0,
     val landscapeBig: Boolean = true,
-    /** Repris ici parce que les séries s'en servent comme seuil. */
-    val goalMinutes: Int = Prefs.DEFAULT_GOAL_MINUTES,
+    val dayDetail: Boolean = true,
+    val showShare: Boolean = true,
+)
+
+/** Ce que l'accueil montre : carte de récupération, bandes récentes, toucher des cases. */
+data class HomePrefs(
+    val card: Boolean = true,
+    val gauge: Boolean = true,
+    val breakdown: Boolean = true,
+    val strips: Set<Metric> = setOf(Metric.SLEEP, Metric.STEPS, Metric.RECOVERY),
+    val stripSize: Int = 1,
+    val tapDetail: Boolean = true,
+    val startTab: String = "HOME",
 )
 
 /**
@@ -154,8 +279,6 @@ object DataCache {
         val root = JSONObject()
         root.put("sleep", jsonOf(data.nights.filterKeys { it > floor }.mapValues { it.value.toMinutes().toDouble() }))
         root.put("steps", jsonOf(data.steps.filterKeys { it > floor }.mapValues { it.value.toDouble() }))
-        root.put("heart", jsonOf(data.heart.filterKeys { it > floor }))
-        root.put("weight", jsonOf(data.weight.filterKeys { it > floor }))
         root.put("screen", jsonOf(data.screen.filterKeys { it > floor }))
         root.put("hrv", jsonOf(data.hrv.filterKeys { it > floor }))
         val json = root.toString()
@@ -187,8 +310,6 @@ object DataCache {
             HealthData(
                 nights = readMap(root, "sleep").mapValues { Duration.ofMinutes(it.value.toLong()) },
                 steps = readMap(root, "steps").mapValues { it.value.toLong() },
-                heart = readMap(root, "heart"),
-                weight = readMap(root, "weight"),
                 screen = readMap(root, "screen"),
                 hrv = readMap(root, "hrv"),
             )

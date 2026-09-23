@@ -7,92 +7,109 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Score de récupération d'un matin, de 0 à 100, et ses sous-scores. Une composante sans
- * donnée ou sans ligne de base vaut null : elle ne compte pas, les autres se partagent son poids.
+ * Score de récupération d'un matin, de 0 à 100, et ses sous-scores. Une composante désactivée,
+ * sans donnée ou sans ligne de base vaut null : elle ne compte pas dans la moyenne.
  */
 data class RecoveryScore(
     val total: Int,
     val sleep: Int?,
     val hrv: Int?,
-    val heart: Int?,
     val load: Int?,
 )
 
-/** Seuils du cœur au repos, partagés avec l'échelle de couleurs de la grille. */
-val HEART_BOUNDS = listOf(52.0, 58.0, 64.0, 70.0)
+/** Ce qui entre dans le score ; chaque composante se coupe dans les réglages. */
+enum class RecoveryComponent(val label: String) {
+    SLEEP("Sommeil"),
+    HRV("VFC"),
+    LOAD("Pas de la veille"),
+}
 
-/** Seuils du score, du rouge au vert vif ; « au vert » à partir de [RECOVERY_GOOD]. */
-val RECOVERY_BOUNDS = listOf(34.0, 50.0, 67.0, 80.0)
-const val RECOVERY_GOOD = 67
-
-/** La ligne de base : les quatre semaines d'avant, pas celle du jour lui-même. */
-const val RECOVERY_BASELINE_DAYS = 28
+/** La ligne de base : les semaines d'avant, pas le jour lui-même. */
+const val DEFAULT_BASELINE_DAYS = 28
+val BASELINE_CHOICES = listOf(14, 28, 56)
 private const val MIN_BASELINE = 7
 
-private const val WEIGHT_SLEEP = 0.30
-private const val WEIGHT_HRV = 0.35
-private const val WEIGHT_HEART = 0.20
-private const val WEIGHT_LOAD = 0.15
+data class RecoveryConfig(
+    val components: Set<RecoveryComponent> = RecoveryComponent.entries.toSet(),
+    val baselineDays: Int = DEFAULT_BASELINE_DAYS,
+    /** Seul l'objectif de sommeil entre dans le calcul : il cale la note de la nuit. */
+    val sleepGoalMinutes: Int = Goals.DEFAULT_SLEEP_MINUTES,
+)
 
 /**
- * Un score par nuit connue, rattaché comme elle à la date du réveil. La VFC et le cœur se
- * comparent à la ligne de base de chacun plutôt qu'à des normes : une VFC de 40 ms est
- * excellente pour l'un, basse pour l'autre.
+ * Un score par matin, rattaché comme la nuit à la date du réveil : la moyenne des composantes
+ * actives. La VFC se compare à la ligne de base de chacun plutôt qu'à une norme : 40 ms est
+ * excellent pour l'un, bas pour l'autre.
  */
 fun recoveryScores(
     nights: Map<LocalDate, Duration>,
     steps: Map<LocalDate, Long>,
-    heart: Map<LocalDate, Double>,
     hrv: Map<LocalDate, Double>,
+    config: RecoveryConfig = RecoveryConfig(),
+    today: LocalDate = LocalDate.now(),
 ): Map<LocalDate, RecoveryScore> {
+    val active = config.components
+    if (active.isEmpty()) return emptyMap()
     // La VFC se distribue de façon très asymétrique : on travaille sur son logarithme.
     val lnHrv = hrv.filterValues { it > 0 }.mapValues { ln(it.value) }
     val stepSeries = steps.mapValues { it.value.toDouble() }
 
+    // Un matin se repère à sa nuit ; sans le sommeil, à sa VFC ; sans l'une ni l'autre, au
+    // lendemain d'une journée de pas.
+    val candidates = when {
+        RecoveryComponent.SLEEP in active -> nights.keys
+        RecoveryComponent.HRV in active -> lnHrv.keys
+        else -> steps.keys.map { it.plusDays(1) }.filter { !it.isAfter(today) }
+    }
+    // Une seule donnée ne fait pas un score, sauf si on n'en a gardé qu'une.
+    val needed = minOf(2, active.size)
+
     val out = mutableMapOf<LocalDate, RecoveryScore>()
-    for ((day, night) in nights) {
-        val sleep = sleepScore(night.toMinutes().toDouble())
-        val hrvPart = lnHrv[day]?.let { value ->
-            baseline(lnHrv, day, skip = 1)?.let { (mean, sd) -> zScore((value - mean) / maxOf(sd, 0.05)) }
+    for (day in candidates) {
+        val sleep = if (RecoveryComponent.SLEEP in active) {
+            nights[day]?.let { sleepScore(it.toMinutes().toDouble(), config.sleepGoalMinutes) }
+        } else {
+            null
         }
-        val heartPart = heart[day]?.let { value ->
-            baseline(heart, day, skip = 1)
-                ?.let { (mean, sd) -> zScore((mean - value) / maxOf(sd, 1.0)) }
-                ?: absoluteHeartScore(value)
+        val hrvPart = if (RecoveryComponent.HRV in active) {
+            lnHrv[day]?.let { value ->
+                baseline(lnHrv, day, skip = 1, days = config.baselineDays)
+                    ?.let { (mean, sd) -> zScore((value - mean) / maxOf(sd, 0.05)) }
+            }
+        } else {
+            null
         }
-        // La charge, c'est la journée d'hier, comparée aux quatre semaines qui la précèdent.
-        val loadPart = stepSeries[day.minusDays(1)]?.let { value ->
-            baseline(stepSeries, day, skip = 2)?.let { (mean, _) -> loadScore(value, mean) }
+        // La charge, c'est la journée d'hier, comparée aux semaines qui la précèdent.
+        val loadPart = if (RecoveryComponent.LOAD in active) {
+            stepSeries[day.minusDays(1)]?.let { value ->
+                baseline(stepSeries, day, skip = 2, days = config.baselineDays)
+                    ?.let { (mean, _) -> loadScore(value, mean) }
+            }
+        } else {
+            null
         }
 
-        val parts = listOfNotNull(
-            WEIGHT_SLEEP to sleep,
-            hrvPart?.let { WEIGHT_HRV to it },
-            heartPart?.let { WEIGHT_HEART to it },
-            loadPart?.let { WEIGHT_LOAD to it },
-        )
-        // La nuit seule ne fait pas un score de récupération, juste une durée repeinte.
-        if (parts.size < 2) continue
-        val total = parts.sumOf { (w, s) -> w * s } / parts.sumOf { it.first }
+        val parts = listOfNotNull(sleep, hrvPart, loadPart)
+        if (parts.size < needed) continue
         out[day] = RecoveryScore(
-            total = total.roundToInt().coerceIn(0, 100),
-            sleep = sleep.roundToInt(),
+            total = parts.average().roundToInt().coerceIn(0, 100),
+            sleep = sleep?.roundToInt(),
             hrv = hrvPart?.roundToInt(),
-            heart = heartPart?.roundToInt(),
             load = loadPart?.roundToInt(),
         )
     }
     return out
 }
 
-/** 4 h ou moins → 0, 8 h ou plus → 100 : le haut de l'échelle de couleurs du sommeil. */
-internal fun sleepScore(minutes: Double): Double = ((minutes - 240.0) / 240.0 * 100.0).coerceIn(0.0, 100.0)
+/**
+ * 0 à 3 h sous l'objectif, 100 à une heure au-dessus : 4 h → 0 et 8 h → 100 avec l'objectif
+ * par défaut de 7 h, le haut de l'échelle de couleurs du sommeil.
+ */
+internal fun sleepScore(minutes: Double, goalMinutes: Int = Goals.DEFAULT_SLEEP_MINUTES): Double =
+    ((minutes - (goalMinutes - 180)) / 240.0 * 100.0).coerceIn(0.0, 100.0)
 
 /** Un jour dans la moyenne vaut 60, deux écarts-types au-dessus 100, trois en dessous 0. */
 private fun zScore(z: Double): Double = (60.0 + 20.0 * z).coerceIn(0.0, 100.0)
-
-/** Sans ligne de base, le cœur retombe sur les seuils absolus de sa grille : 0, 25… 100. */
-internal fun absoluteHeartScore(bpm: Double): Double = (HEART_BOUNDS.size - HEART_BOUNDS.count { bpm >= it }) * 25.0
 
 /** Une journée ordinaire ne coûte rien ; au double de l'habitude, le score tombe à 40. */
 internal fun loadScore(steps: Double, usual: Double): Double {
@@ -105,9 +122,14 @@ internal fun loadScore(steps: Double, usual: Double): Double {
     }
 }
 
-/** Moyenne et écart-type des [RECOVERY_BASELINE_DAYS] jours qui précèdent, [skip] jours avant [day]. */
-private fun baseline(series: Map<LocalDate, Double>, day: LocalDate, skip: Int): Pair<Double, Double>? {
-    val values = (skip until skip + RECOVERY_BASELINE_DAYS).mapNotNull { series[day.minusDays(it.toLong())] }
+/** Moyenne et écart-type des [days] jours qui précèdent, [skip] jours avant [day]. */
+private fun baseline(
+    series: Map<LocalDate, Double>,
+    day: LocalDate,
+    skip: Int,
+    days: Int,
+): Pair<Double, Double>? {
+    val values = (skip until skip + days).mapNotNull { series[day.minusDays(it.toLong())] }
     if (values.size < MIN_BASELINE) return null
     val mean = values.average()
     val variance = values.sumOf { (it - mean) * (it - mean) } / values.size

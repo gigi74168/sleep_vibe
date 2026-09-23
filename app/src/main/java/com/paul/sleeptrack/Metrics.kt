@@ -4,17 +4,18 @@ import androidx.compose.ui.graphics.Color
 import java.time.Duration
 import java.time.LocalDate
 import java.util.Locale
+import kotlin.math.roundToInt
 
-/** Les séries quotidiennes : cinq lues dans Health Connect, le temps d'écran lu dans Android. */
+/** Les séries quotidiennes : trois lues dans Health Connect, le temps d'écran lu dans Android. */
 data class HealthData(
     val nights: Map<LocalDate, Duration> = emptyMap(),
     val steps: Map<LocalDate, Long> = emptyMap(),
-    val heart: Map<LocalDate, Double> = emptyMap(),
-    val weight: Map<LocalDate, Double> = emptyMap(),
     /** Minutes d'écran allumé et déverrouillé. */
     val screen: Map<LocalDate, Double> = emptyMap(),
     /** VFC nocturne (RMSSD, en ms), rattachée comme le sommeil à la date du réveil. */
     val hrv: Map<LocalDate, Double> = emptyMap(),
+    /** Ce qui entre dans le score de récupération, tiré des réglages. */
+    val recoveryConfig: RecoveryConfig = RecoveryConfig(),
     /**
      * Scores déjà calculés sur un historique plus large : une année filtrée garde ainsi, pour
      * ses premiers jours, la ligne de base prise en décembre. Null : calculés sur ces données.
@@ -29,22 +30,21 @@ data class HealthData(
 
     /** Score de récupération de chaque matin, jamais stocké : toujours recalculé. */
     val recovery: Map<LocalDate, RecoveryScore> by lazy {
-        precomputedRecovery ?: recoveryScores(nights, steps, heart, hrv)
+        precomputedRecovery ?: recoveryScores(nights, steps, hrv, recoveryConfig)
     }
 
-    /** Série normalisée : minutes, score, pas, bpm, kg ou minutes d'écran selon la métrique. */
+    /** Série normalisée : minutes, score, pas ou minutes d'écran selon la métrique. */
     fun series(metric: Metric): Map<LocalDate, Double> = when (metric) {
         Metric.SLEEP -> sleepSeries
         Metric.RECOVERY -> recoverySeries
         Metric.STEPS -> stepSeries
-        Metric.HEART -> heart
-        Metric.WEIGHT -> weight
         Metric.SCREEN -> screen
     }
 
-    fun isEmpty(): Boolean =
-        nights.isEmpty() && steps.isEmpty() && heart.isEmpty() && weight.isEmpty() && screen.isEmpty() &&
-            hrv.isEmpty()
+    fun isEmpty(): Boolean = nights.isEmpty() && steps.isEmpty() && screen.isEmpty() && hrv.isEmpty()
+
+    /** Les mêmes séries, avec un score de récupération calculé selon [config]. */
+    fun withRecovery(config: RecoveryConfig) = HealthData(nights, steps, screen, hrv, config)
 
     fun filterYear(year: Int) = filterDays { it.year == year }
 
@@ -55,30 +55,25 @@ data class HealthData(
     private fun filterDays(keep: (LocalDate) -> Boolean) = HealthData(
         nights.filterKeys(keep),
         steps.filterKeys(keep),
-        heart.filterKeys(keep),
-        weight.filterKeys(keep),
         screen.filterKeys(keep),
         hrv.filterKeys(keep),
+        recoveryConfig,
         recovery.filterKeys(keep),
     )
 
     operator fun plus(other: HealthData) = HealthData(
         nights + other.nights,
         steps + other.steps,
-        heart + other.heart,
-        weight + other.weight,
         screen + other.screen,
         hrv + other.hrv,
+        recoveryConfig,
     )
 }
 
-enum class Metric(val label: String, val detailLabel: String, val canHide: Boolean = true) {
-    SLEEP("Sommeil", "Sommeil", canHide = false),
-    // Calculée à partir des autres, c'est le cœur de l'accueil : elle ne se masque pas.
-    RECOVERY("Récup", "Récupération", canHide = false),
+enum class Metric(val label: String, val detailLabel: String) {
+    SLEEP("Sommeil", "Sommeil"),
+    RECOVERY("Récup", "Récupération"),
     STEPS("Pas", "Pas"),
-    HEART("Cœur", "Cœur au repos"),
-    WEIGHT("Poids", "Poids"),
     SCREEN("Écran", "Temps d'écran"),
 }
 
@@ -86,8 +81,6 @@ fun Metric.format(value: Double): String = when (this) {
     Metric.SLEEP -> formatDuration(Duration.ofMinutes(value.toLong()))
     Metric.RECOVERY -> "%.0f".format(value)
     Metric.STEPS -> formatSteps(value.toLong())
-    Metric.HEART -> "%.0f bpm".format(value)
-    Metric.WEIGHT -> "%.1f kg".format(Locale.FRENCH, value)
     Metric.SCREEN -> formatDuration(Duration.ofMinutes(value.toLong()))
 }
 
@@ -98,9 +91,41 @@ fun Metric.countLabel(n: Int): String {
 }
 
 /**
- * Cinq niveaux de couleur. Pour le sommeil et les pas, plus c'est haut mieux c'est ;
- * pour le cœur au repos c'est l'inverse ; le poids n'a pas de « mieux » et reçoit
- * un dégradé neutre calé sur les quintiles de l'année affichée.
+ * Les objectifs, réglables. Ils décident des séries, des tuiles et des couleurs : chaque
+ * échelle se cale sur son objectif.
+ */
+data class Goals(
+    val sleepMinutes: Int = DEFAULT_SLEEP_MINUTES,
+    val steps: Int = DEFAULT_STEPS,
+    val screenMinutes: Int = DEFAULT_SCREEN_MINUTES,
+    val recoveryGood: Int = DEFAULT_RECOVERY_GOOD,
+) {
+    companion object {
+        const val DEFAULT_SLEEP_MINUTES = 420
+        const val DEFAULT_STEPS = 10_000
+        const val DEFAULT_SCREEN_MINUTES = 180
+        const val DEFAULT_RECOVERY_GOOD = 67
+    }
+}
+
+/**
+ * Les quatre seuils entre les cinq couleurs, du plus bas au plus haut. Avec les objectifs par
+ * défaut, ce sont les seuils d'avant qu'ils soient réglables : 5/6/7/8 h, 3/6/8/10k pas,
+ * 2/3/4/5 h d'écran, 34/50/67/80 de récupération.
+ */
+fun boundsFor(metric: Metric, goals: Goals): List<Double> = when (metric) {
+    Metric.SLEEP -> goals.sleepMinutes.let { g -> listOf(g - 120.0, g - 60.0, g.toDouble(), g + 60.0) }
+    Metric.RECOVERY -> goals.recoveryGood.let { g ->
+        listOf(g - 33.0, g - 17.0, g.toDouble(), minOf(g + 13.0, 100.0))
+    }
+    // Multiplier avant de diviser : 0,3 × 10 000 donnerait 3 000,000…1 et non 3 000.
+    Metric.STEPS -> listOf(3, 6, 8, 10).map { it * goals.steps / 10.0 }
+    Metric.SCREEN -> listOf(2, 3, 4, 5).map { it * goals.screenMinutes / 3.0 }
+}
+
+/**
+ * Cinq niveaux de couleur. Pour le sommeil, la récupération et les pas, plus c'est haut mieux
+ * c'est ; pour le temps d'écran c'est l'inverse.
  */
 class Scale(
     private val bounds: List<Double>,
@@ -116,53 +141,45 @@ class Scale(
     fun colorOf(value: Double): Color = colors[levelOf(value)]
 }
 
-fun scaleFor(metric: Metric, data: HealthData): Scale = when (metric) {
-    Metric.SLEEP -> Scale(
-        listOf(300.0, 360.0, 420.0, 480.0), false, Palette.levels,
-        listOf("<5h", "5-6h", "6-7h", "7-8h", "8h+"),
-    )
-    Metric.RECOVERY -> Scale(
-        RECOVERY_BOUNDS, false, Palette.levels,
-        listOf("<34", "34-50", "50-67", "67-80", "80+"),
-    )
-    Metric.STEPS -> Scale(
-        listOf(3_000.0, 6_000.0, 8_000.0, 10_000.0), false, Palette.levels,
-        listOf("<3k", "3-6k", "6-8k", "8-10k", "10k+"),
-    )
-    Metric.HEART -> Scale(
-        HEART_BOUNDS, true, Palette.levels,
-        listOf("70+", "64-70", "58-64", "52-58", "<52"),
-    )
-    Metric.WEIGHT -> weightScale(data.weight.values)
-    // Moins il y en a, mieux c'est : l'échelle est inversée, comme celle du cœur.
-    Metric.SCREEN -> Scale(
-        listOf(120.0, 180.0, 240.0, 300.0), true, Palette.levels,
-        listOf("5h+", "4-5h", "3-4h", "2-3h", "<2h"),
-    )
+fun scaleFor(metric: Metric, goals: Goals): Scale {
+    val bounds = boundsFor(metric, goals)
+    // Libellés du plus bas au plus haut ; l'écran les lit à l'envers, du pire au meilleur.
+    val labels = when (metric) {
+        Metric.SLEEP, Metric.SCREEN -> rangeLabels(bounds.map { it.roundToInt() }, ::hoursText, "h")
+        Metric.STEPS -> rangeLabels(bounds.map { it.roundToInt() }, ::thousandsText, "k")
+        Metric.RECOVERY -> rangeLabels(bounds.map { it.roundToInt() }, { it.toString() }, "")
+    }
+    val reversed = metric == Metric.SCREEN
+    return Scale(bounds, reversed, Palette.levels, if (reversed) labels.reversed() else labels)
 }
 
-private fun weightScale(values: Collection<Double>): Scale {
-    val sorted = values.sorted()
-    if (sorted.size < 5) {
-        return Scale(listOf(0.0, 0.0, 0.0, 0.0), false, Palette.weightRamp, List(5) { "—" })
-    }
-    val bounds = (1..4).map { sorted[sorted.size * it / 5] }
-    val decimals = if (sorted.last() - sorted.first() >= 5) 0 else 1
-    fun fmt(v: Double) = "%.${decimals}f".format(Locale.FRENCH, v)
-    val labels = listOf(
-        "<${fmt(bounds[0])}",
-        fmt(bounds[0]),
-        fmt(bounds[1]),
-        fmt(bounds[2]),
-        "${fmt(bounds[3])}+",
-    )
-    return Scale(bounds, false, Palette.weightRamp, labels)
+/** « <5h », « 5-6h »… « 8h+ » : l'unité n'est écrite qu'une fois par libellé. */
+private fun rangeLabels(bounds: List<Int>, text: (Int) -> String, unit: String): List<String> {
+    // « 7h30 » porte déjà son « h » : on n'en ajoute pas un second.
+    fun withUnit(value: Int) = text(value).let { if (unit == "h" && 'h' in it) it else it + unit }
+    return listOf("<${withUnit(bounds[0])}") +
+        bounds.zipWithNext { a, b -> "${text(a)}-${withUnit(b)}" } +
+        "${withUnit(bounds.last())}+"
+}
+
+// 420 → « 7 », 450 → « 7h30 » : le « h » final vient de l'unité du libellé.
+private fun hoursText(minutes: Int): String =
+    if (minutes % 60 == 0) "${minutes / 60}" else "%dh%02d".format(minutes / 60, minutes % 60)
+
+private fun thousandsText(steps: Int): String =
+    if (steps % 1_000 == 0) "${steps / 1_000}" else "%.1f".format(Locale.FRENCH, steps / 1_000.0)
+
+/** « 10k », « 7h30 » : un objectif écrit court, pour un libellé de tuile. */
+fun shortGoal(metric: Metric, value: Int): String = when (metric) {
+    Metric.SLEEP, Metric.SCREEN -> hoursText(value).let { if ('h' in it) it else "${it}h" }
+    Metric.STEPS -> "${thousandsText(value)}k"
+    Metric.RECOVERY -> "$value"
 }
 
 /** Une tuile de statistique, partagée entre l'écran principal et l'image exportée. */
 data class StatTile(val label: String, val value: String, val color: Color)
 
-fun statTiles(metric: Metric, data: HealthData, scale: Scale): List<StatTile> {
+fun statTiles(metric: Metric, data: HealthData, scale: Scale, goals: Goals): List<StatTile> {
     val series = data.series(metric)
     if (series.isEmpty()) return emptyList()
     val today = LocalDate.now()
@@ -174,97 +191,47 @@ fun statTiles(metric: Metric, data: HealthData, scale: Scale): List<StatTile> {
     val recentTile = recent?.let { tile("7 derniers jours", it) }
         ?: StatTile("7 derniers jours", "—", Palette.muted)
 
+    // La quatrième tuile compte les bons jours, selon l'objectif ; elle est verte s'il y en a.
+    fun countTile(label: String, n: Int) =
+        StatTile(label, "$n", if (n > 0) Palette.levels.last() else Palette.levels[0])
+
     return when (metric) {
         Metric.SLEEP -> {
-            val short = series.values.count { it < 360 }
+            // Une heure sous l'objectif : le seuil du orange, « Nuits < 6h » par défaut.
+            val short = goals.sleepMinutes - 60
+            val count = series.values.count { it < short }
             listOf(
                 tile("Moyenne", average),
                 recentTile,
                 tile("Record", series.values.max()),
                 StatTile(
-                    "Nuits < 6h", "$short",
-                    if (short > 0) Palette.levels[0] else Palette.levels.last(),
+                    "Nuits < ${shortGoal(metric, short)}", "$count",
+                    if (count > 0) Palette.levels[0] else Palette.levels.last(),
                 ),
             )
         }
-        Metric.RECOVERY -> {
-            val green = series.values.count { it >= RECOVERY_GOOD }
-            listOf(
-                tile("Moyenne", average),
-                recentTile,
-                tile("Meilleur", series.values.max()),
-                StatTile(
-                    "Jours ≥ $RECOVERY_GOOD", "$green",
-                    if (green > 0) Palette.levels.last() else Palette.levels[0],
-                ),
-            )
-        }
-        Metric.STEPS -> {
-            val goalDays = series.values.count { it >= 10_000 }
-            listOf(
-                tile("Moyenne", average),
-                recentTile,
-                tile("Record", series.values.max()),
-                StatTile(
-                    "Jours ≥ 10k", "$goalDays",
-                    if (goalDays > 0) Palette.levels.last() else Palette.levels[0],
-                ),
-            )
-        }
-        Metric.HEART -> listOf(
+        Metric.RECOVERY -> listOf(
             tile("Moyenne", average),
             recentTile,
-            tile("Plus bas", series.values.min()),
-            trendTile(metric, series, "Tendance 30j", lowerIsBetter = true),
+            tile("Meilleur", series.values.max()),
+            countTile("Jours ≥ ${goals.recoveryGood}", series.values.count { it >= goals.recoveryGood }),
         )
-        Metric.SCREEN -> {
-            val light = series.values.count { it < 180 }
-            listOf(
-                tile("Moyenne", average),
-                recentTile,
-                tile("Plus sobre", series.values.min()),
-                StatTile(
-                    "Jours < 3h", "$light",
-                    if (light > 0) Palette.levels.last() else Palette.levels[0],
-                ),
-            )
-        }
-        Metric.WEIGHT -> {
-            val latest = series.maxByOrNull { it.key }!!.value
-            listOf(
-                StatTile("Dernière pesée", metric.format(latest), Palette.text),
-                tile("Moyenne", average),
-                StatTile(
-                    "Amplitude",
-                    "%.1f kg".format(Locale.FRENCH, series.values.max() - series.values.min()),
-                    Palette.text,
-                ),
-                trendTile(metric, series, "Tendance 30j", lowerIsBetter = false),
-            )
-        }
+        Metric.STEPS -> listOf(
+            tile("Moyenne", average),
+            recentTile,
+            tile("Record", series.values.max()),
+            countTile("Jours ≥ ${shortGoal(metric, goals.steps)}", series.values.count { it >= goals.steps }),
+        )
+        Metric.SCREEN -> listOf(
+            tile("Moyenne", average),
+            recentTile,
+            tile("Plus sobre", series.values.min()),
+            countTile(
+                "Jours < ${shortGoal(metric, goals.screenMinutes)}",
+                series.values.count { it < goals.screenMinutes },
+            ),
+        )
     }
-}
-
-/** Écart entre la moyenne des 30 derniers jours et celle des 30 précédents. */
-private fun trendTile(
-    metric: Metric,
-    series: Map<LocalDate, Double>,
-    label: String,
-    lowerIsBetter: Boolean,
-): StatTile {
-    val today = LocalDate.now()
-    val recent = series.filterKeys { it > today.minusDays(30) }.values
-    val previous = series.filterKeys { it <= today.minusDays(30) && it > today.minusDays(60) }.values
-    if (recent.size < 3 || previous.size < 3) return StatTile(label, "—", Palette.muted)
-    val delta = recent.average() - previous.average()
-    val unit = if (metric == Metric.WEIGHT) "kg" else "bpm"
-    val color = when {
-        !lowerIsBetter -> Palette.text
-        delta <= -0.5 -> Palette.levels.last()
-        delta >= 0.5 -> Palette.levels[0]
-        else -> Palette.muted
-    }
-    return StatTile(label, "%+.1f %s".format(Locale.FRENCH, delta, unit), color)
 }
 
 fun formatDuration(d: Duration): String = "%dh%02d".format(d.toHours(), d.toMinutesPart())

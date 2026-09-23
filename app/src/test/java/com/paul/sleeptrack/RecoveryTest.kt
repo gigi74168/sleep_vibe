@@ -1,6 +1,7 @@
 package com.paul.sleeptrack
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -28,53 +29,38 @@ class RecoveryTest {
 
     @Test
     fun aNightAloneGivesNoScore() {
-        val scores = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), emptyMap(), emptyMap())
+        val scores = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), emptyMap())
         assertTrue(scores.isEmpty())
     }
 
     @Test
-    fun heartWithoutBaselineFallsBackOnAbsoluteThresholds() {
-        val score = recoveryScores(
-            nights = mapOf(day to hours(8.0)),
-            steps = emptyMap(),
-            heart = mapOf(day to 50.0),
-            hrv = mapOf(day to 60.0),
-        ).getValue(day)
-        assertEquals(100, score.heart)
-        // La VFC n'a pas de seuil absolu : sans ligne de base, elle ne compte pas.
-        assertNull(score.hrv)
-        assertNull(score.load)
-        assertEquals(100, score.total)
-    }
-
-    @Test
-    fun anOrdinaryMorningScoresSixtyOnHrvAndHeart() {
+    fun sleepAndHrvAverageToFiftyFive() {
         val hrv = flat(day, 14, 50.0) + (day to 50.0)
-        val heart = flat(day, 14, 55.0) + (day to 55.0)
-        val score = recoveryScores(mapOf(day to hours(6.0)), emptyMap(), heart, hrv).getValue(day)
+        val score = recoveryScores(mapOf(day to hours(6.0)), emptyMap(), hrv).getValue(day)
         assertEquals(60, score.hrv)
-        assertEquals(60, score.heart)
         assertEquals(50, score.sleep)
-        // (0,30·50 + 0,35·60 + 0,20·60) / 0,85
-        assertEquals(56, score.total)
+        assertNull(score.load)
+        // Moyenne simple, plus de pondération : (50 + 60) / 2.
+        assertEquals(55, score.total)
     }
 
     @Test
     fun hrvAboveBaselineRaisesTheScore() {
         val hrv = (1..14).associate { day.minusDays(it.toLong()) to if (it % 2 == 0) 45.0 else 55.0 } +
             (day to 70.0)
-        val score = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), emptyMap(), hrv).getValue(day)
+        val score = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), hrv).getValue(day)
         assertEquals(100, score.hrv)
     }
 
     @Test
     fun aHeavyDayBeforeLowersTheLoadPart() {
         val steps = flat(day.minusDays(1), 20, 8_000L) + (day.minusDays(1) to 16_000L)
-        val score = recoveryScores(mapOf(day to hours(8.0)), steps, emptyMap(), emptyMap()).getValue(day)
+        val score = recoveryScores(mapOf(day to hours(8.0)), steps, emptyMap()).getValue(day)
         assertEquals(40, score.load)
         assertEquals(100, score.sleep)
-        // (0,30·100 + 0,15·40) / 0,45
-        assertEquals(80, score.total)
+        assertNull(score.hrv)
+        // Moyenne simple : (100 + 40) / 2.
+        assertEquals(70, score.total)
     }
 
     @Test
@@ -88,9 +74,50 @@ class RecoveryTest {
     @Test
     fun baselineNeedsSevenDays() {
         val hrv = flat(day, 6, 50.0) + (day to 50.0)
-        val score = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), mapOf(day to 55.0), hrv).getValue(day)
+        val steps = flat(day.minusDays(1), 20, 8_000L) + (day.minusDays(1) to 8_000L)
+        val score = recoveryScores(mapOf(day to hours(8.0)), steps, hrv).getValue(day)
         assertNull(score.hrv)
-        assertNotNull(score.heart)
+        assertNotNull(score.load)
+    }
+
+    @Test
+    fun aDisabledComponentIsExcluded() {
+        val hrv = flat(day, 14, 50.0) + (day to 70.0)
+        val steps = flat(day.minusDays(1), 20, 8_000L) + (day.minusDays(1) to 8_000L)
+        val config = RecoveryConfig(components = setOf(RecoveryComponent.SLEEP, RecoveryComponent.LOAD))
+        val score = recoveryScores(mapOf(day to hours(8.0)), steps, hrv, config).getValue(day)
+        assertNull(score.hrv)
+        assertEquals(100, score.sleep)
+        assertNotNull(score.load)
+    }
+
+    @Test
+    fun sleepDisabledScoresWithoutANight() {
+        val hrv = flat(day, 14, 50.0) + (day to 70.0)
+        val steps = flat(day.minusDays(1), 20, 8_000L) + (day.minusDays(1) to 8_000L)
+        val config = RecoveryConfig(components = setOf(RecoveryComponent.HRV, RecoveryComponent.LOAD))
+        val scores = recoveryScores(emptyMap(), steps, hrv, config)
+        assertNotNull(scores[day])
+        assertNull(scores.getValue(day).sleep)
+    }
+
+    @Test
+    fun zeroComponentsGivesNoScores() {
+        val config = RecoveryConfig(components = emptySet())
+        val scores = recoveryScores(mapOf(day to hours(8.0)), emptyMap(), emptyMap(), config)
+        assertTrue(scores.isEmpty())
+    }
+
+    @Test
+    fun baselineWindowFollowsTheConfiguredPeriod() {
+        val hrv = (1..30).associate { day.minusDays(it.toLong()) to if (it <= 14) 80.0 else 20.0 } + (day to 50.0)
+        val score14 = recoveryScores(
+            mapOf(day to hours(8.0)), emptyMap(), hrv, RecoveryConfig(baselineDays = 14),
+        ).getValue(day)
+        val score28 = recoveryScores(
+            mapOf(day to hours(8.0)), emptyMap(), hrv, RecoveryConfig(baselineDays = 28),
+        ).getValue(day)
+        assertNotEquals(score14.hrv, score28.hrv)
     }
 
     @Test
@@ -104,6 +131,24 @@ class RecoveryTest {
         assertEquals(setOf(jan1), year.hrv.keys)
         assertEquals(60, year.recovery.getValue(jan1).hrv)
         // Recalculé sur l'année seule, le score perdrait sa VFC faute de ligne de base.
-        assertTrue(recoveryScores(year.nights, year.steps, year.heart, year.hrv).isEmpty())
+        assertTrue(recoveryScores(year.nights, year.steps, year.hrv).isEmpty())
+    }
+
+    @Test
+    fun boundsForDefaultGoalsMatchOldThresholds() {
+        val goals = Goals()
+        assertEquals(listOf(300.0, 360.0, 420.0, 480.0), boundsFor(Metric.SLEEP, goals))
+        assertEquals(listOf(3000.0, 6000.0, 8000.0, 10000.0), boundsFor(Metric.STEPS, goals))
+        assertEquals(listOf(120.0, 180.0, 240.0, 300.0), boundsFor(Metric.SCREEN, goals))
+        assertEquals(listOf(34.0, 50.0, 67.0, 80.0), boundsFor(Metric.RECOVERY, goals))
+    }
+
+    @Test
+    fun boundsForFollowsModifiedGoals() {
+        val goals = Goals(sleepMinutes = 480, steps = 12_000, screenMinutes = 120, recoveryGood = 70)
+        assertEquals(listOf(360.0, 420.0, 480.0, 540.0), boundsFor(Metric.SLEEP, goals))
+        assertEquals(listOf(3600.0, 7200.0, 9600.0, 12000.0), boundsFor(Metric.STEPS, goals))
+        assertEquals(listOf(80.0, 120.0, 160.0, 200.0), boundsFor(Metric.SCREEN, goals))
+        assertEquals(listOf(37.0, 53.0, 70.0, 83.0), boundsFor(Metric.RECOVERY, goals))
     }
 }

@@ -16,12 +16,13 @@ import java.time.LocalDate
  * ```json
  * { "app": "sommeil", "format": 1, "exportedAt": "2026-09-18",
  *   "days": [ { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123,
- *               "restingHeartRate": 56.2, "weightKg": 72.4, "hrvRmssd": 48.1 } ] }
+ *               "screenMinutes": 214, "hrvRmssd": 48.1 } ] }
  * ```
  *
  * La lecture est volontairement tolérante : `days` peut aussi être un objet indexé par date,
  * les heures de sommeil sont acceptées à la place des minutes, et les noms de champs les plus
- * courants ailleurs (`heartRate`, `weight`, `step_count`…) sont reconnus.
+ * courants ailleurs (`step_count`, `rmssd`…) sont reconnus. Le poids et le cœur au repos des
+ * anciennes sauvegardes sont ignorés : l'app ne les suit plus.
  */
 const val BACKUP_FORMAT = 1
 
@@ -103,13 +104,11 @@ fun exportBackup(context: Context, uri: Uri, data: HealthData): Int {
 fun exportCsv(context: Context, uri: Uri, data: HealthData): Int {
     val days = allDays(data).sorted()
     val text = buildString {
-        append("date,sleep_minutes,steps,resting_heart_rate,weight_kg,screen_minutes,hrv_rmssd_ms\n")
+        append("date,sleep_minutes,steps,screen_minutes,hrv_rmssd_ms\n")
         for (date in days) {
             append(date).append(',')
             append(data.nights[date]?.toMinutes() ?: "").append(',')
             append(data.steps[date] ?: "").append(',')
-            append(data.heart[date]?.let { round1(it) } ?: "").append(',')
-            append(data.weight[date]?.let { round1(it) } ?: "").append(',')
             append(data.screen[date]?.let { Math.round(it) } ?: "").append(',')
             append(data.hrv[date]?.let { round1(it) } ?: "").append('\n')
         }
@@ -131,7 +130,7 @@ fun importBackup(context: Context, uri: Uri): HealthData {
 fun dayCount(data: HealthData): Int = allDays(data).size
 
 private fun allDays(data: HealthData): Set<LocalDate> =
-    data.nights.keys + data.steps.keys + data.heart.keys + data.weight.keys + data.screen.keys + data.hrv.keys
+    data.nights.keys + data.steps.keys + data.screen.keys + data.hrv.keys
 
 // Le score de récupération n'est pas sauvegardé : il se recalcule à partir de ces séries.
 fun encodeBackup(data: HealthData): JSONObject {
@@ -141,8 +140,6 @@ fun encodeBackup(data: HealthData): JSONObject {
         val day = JSONObject().put("date", date.toString())
         data.nights[date]?.let { day.put("sleepMinutes", it.toMinutes()) }
         data.steps[date]?.let { day.put("steps", it) }
-        data.heart[date]?.let { day.put("restingHeartRate", round1(it)) }
-        data.weight[date]?.let { day.put("weightKg", round1(it)) }
         data.screen[date]?.let { day.put("screenMinutes", Math.round(it)) }
         data.hrv[date]?.let { day.put("hrvRmssd", round1(it)) }
         array.put(day)
@@ -150,8 +147,6 @@ fun encodeBackup(data: HealthData): JSONObject {
     val units = JSONObject()
         .put("sleepMinutes", "minutes de sommeil dans la nuit qui se termine ce jour-là")
         .put("steps", "pas du jour")
-        .put("restingHeartRate", "battements par minute au repos")
-        .put("weightKg", "kilogrammes")
         .put("screenMinutes", "minutes d'écran allumé et déverrouillé")
         .put("hrvRmssd", "variabilité cardiaque nocturne (RMSSD), en millisecondes")
     return JSONObject()
@@ -165,8 +160,6 @@ fun encodeBackup(data: HealthData): JSONObject {
 fun decodeBackup(root: JSONObject): HealthData {
     val nights = mutableMapOf<LocalDate, Duration>()
     val steps = mutableMapOf<LocalDate, Long>()
-    val heart = mutableMapOf<LocalDate, Double>()
-    val weight = mutableMapOf<LocalDate, Double>()
     val screen = mutableMapOf<LocalDate, Double>()
     val hrv = mutableMapOf<LocalDate, Double>()
 
@@ -176,9 +169,6 @@ fun decodeBackup(root: JSONObject): HealthData {
         number(day, "sleepHours", "hoursAsleep")
             ?.let { nights[date] = Duration.ofMinutes((it * 60).toLong()) }
         number(day, "steps", "step_count", "stepCount")?.let { steps[date] = it.toLong() }
-        number(day, "restingHeartRate", "resting_heart_rate", "heartRate", "bpm")
-            ?.let { heart[date] = it }
-        number(day, "weightKg", "weight_kg", "weight")?.let { weight[date] = it }
         number(day, "screenMinutes", "screen_minutes", "screenTimeMinutes", "screenTime")
             ?.let { screen[date] = it }
         number(day, "hrvRmssd", "hrv_rmssd_ms", "hrv", "rmssd")?.let { hrv[date] = it }
@@ -200,12 +190,10 @@ fun decodeBackup(root: JSONObject): HealthData {
     // Dernière tolérance : des séries à plat, une par métrique.
     flatSeries(root, "sleepMinutes", "sleep")?.forEach { (d, v) -> nights[d] = Duration.ofMinutes(v.toLong()) }
     flatSeries(root, "steps")?.forEach { (d, v) -> steps[d] = v.toLong() }
-    flatSeries(root, "restingHeartRate", "heart")?.forEach { (d, v) -> heart[d] = v }
-    flatSeries(root, "weightKg", "weight")?.forEach { (d, v) -> weight[d] = v }
     flatSeries(root, "screenMinutes", "screen")?.forEach { (d, v) -> screen[d] = v }
     flatSeries(root, "hrvRmssd", "hrv")?.forEach { (d, v) -> hrv[d] = v }
 
-    return HealthData(nights, steps, heart, weight, screen, hrv)
+    return HealthData(nights, steps, screen, hrv)
 }
 
 private fun flatSeries(root: JSONObject, vararg names: String): Map<LocalDate, Double>? {

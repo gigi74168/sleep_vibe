@@ -40,6 +40,7 @@ fun renderStrip(
     today: LocalDate = LocalDate.now(),
     /** Le fond du widget ; l'accueil, qui pose la bande sur ses cartes, en prend la couleur. */
     background: Int = Palette.bg.toArgb(),
+    goals: Goals = Goals(),
 ): Bitmap {
     val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(100), heightPx.coerceAtLeast(60), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
@@ -60,7 +61,7 @@ fun renderStrip(
     val weeks = (((w - 2 * pad) / pitch).toInt()).coerceIn(3, 40)
 
     val series = data.series(metric)
-    val scale = scaleFor(metric, data)
+    val scale = scaleFor(metric, goals)
     val lastMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val gridStart = lastMonday.minusWeeks((weeks - 1).toLong())
     val shown = series.filterKeys { it >= gridStart && !it.isAfter(today) }
@@ -100,10 +101,11 @@ fun renderYearCard(
     year: Int,
     metric: Metric,
     data: HealthData,
+    goals: Goals,
     widthPx: Int = 1400,
 ): Bitmap {
     val series = data.series(metric)
-    val scale = scaleFor(metric, data)
+    val scale = scaleFor(metric, goals)
     val pad = widthPx * 0.05f
     val labelWidth = widthPx * 0.035f
 
@@ -188,7 +190,7 @@ fun renderYearCard(
 
     // Tuiles de statistiques
     y += smallSize * 1.6f
-    val tiles = statTiles(metric, data, scale)
+    val tiles = statTiles(metric, data, scale, goals)
     val tileWidth = (widthPx - 2 * pad - pad * 0.3f) / 2
     tiles.take(4).forEachIndexed { i, tile ->
         val tx = pad + (i % 2) * (tileWidth + pad * 0.3f)

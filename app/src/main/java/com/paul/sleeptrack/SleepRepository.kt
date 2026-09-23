@@ -4,10 +4,8 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.Record
-import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -25,26 +23,37 @@ const val PERMISSION_READ_HISTORY = "android.permission.health.READ_HEALTH_DATA_
 const val PERMISSION_READ_BACKGROUND = "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
 val PERMISSION_READ_SLEEP = HealthPermission.getReadPermission(SleepSessionRecord::class)
 val PERMISSION_READ_STEPS = HealthPermission.getReadPermission(StepsRecord::class)
-val PERMISSION_READ_HEART = HealthPermission.getReadPermission(RestingHeartRateRecord::class)
-val PERMISSION_READ_WEIGHT = HealthPermission.getReadPermission(WeightRecord::class)
 val PERMISSION_READ_HRV = HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)
 
-/** Les lectures de données : au moins une suffit pour afficher quelque chose. */
+/**
+ * Les lectures de données, avec ce qu'elles apportent : au moins une suffit pour afficher
+ * quelque chose. La VFC n'a pas d'onglet, elle ne sert qu'au score de récupération.
+ */
 val DATA_PERMISSIONS = mapOf(
-    Metric.SLEEP to PERMISSION_READ_SLEEP,
-    // La VFC n'a pas d'onglet : elle ne sert qu'au score de récupération.
-    Metric.RECOVERY to PERMISSION_READ_HRV,
-    Metric.STEPS to PERMISSION_READ_STEPS,
-    Metric.HEART to PERMISSION_READ_HEART,
-    Metric.WEIGHT to PERMISSION_READ_WEIGHT,
+    PERMISSION_READ_SLEEP to "le sommeil",
+    PERMISSION_READ_STEPS to "les pas",
+    PERMISSION_READ_HRV to "la variabilité cardiaque",
 )
 
 val REQUESTED_PERMISSIONS =
-    DATA_PERMISSIONS.values.toSet() + PERMISSION_READ_HISTORY + PERMISSION_READ_BACKGROUND
+    DATA_PERMISSIONS.keys + PERMISSION_READ_HISTORY + PERMISSION_READ_BACKGROUND
 
-/** Ce qu'on demande vraiment : inutile de réclamer le poids si l'utilisateur l'a masqué. */
-fun requestedPermissions(visible: List<Metric>): Set<String> =
-    visible.mapNotNull { DATA_PERMISSIONS[it] }.toSet() + PERMISSION_READ_HISTORY + PERMISSION_READ_BACKGROUND
+/**
+ * Ce qu'on demande vraiment : les lectures des onglets affichés, et celles des composantes du
+ * score quand il sert quelque part (onglet ou carte d'accueil). VFC coupée : plus réclamée.
+ */
+fun requestedPermissions(visible: List<Metric>, recoveryShown: Boolean, recovery: RecoveryConfig): Set<String> =
+    buildSet {
+        if (Metric.SLEEP in visible) add(PERMISSION_READ_SLEEP)
+        if (Metric.STEPS in visible) add(PERMISSION_READ_STEPS)
+        if (recoveryShown) {
+            if (RecoveryComponent.SLEEP in recovery.components) add(PERMISSION_READ_SLEEP)
+            if (RecoveryComponent.HRV in recovery.components) add(PERMISSION_READ_HRV)
+            if (RecoveryComponent.LOAD in recovery.components) add(PERMISSION_READ_STEPS)
+        }
+        add(PERMISSION_READ_HISTORY)
+        add(PERMISSION_READ_BACKGROUND)
+    }
 
 private val NOT_ASLEEP = setOf(
     SleepSessionRecord.STAGE_TYPE_AWAKE,
@@ -53,7 +62,7 @@ private val NOT_ASLEEP = setOf(
 )
 
 /**
- * Lit toutes les métriques autorisées entre deux dates incluses. Les cinq lectures
+ * Lit toutes les métriques autorisées entre deux dates incluses. Les trois lectures
  * partent ensemble : on attend la plus lente, et non plus leur somme.
  * Les résultats sont attendus dans l'ordre d'avant, pour qu'en cas d'échecs multiples ce
  * soit la même erreur qui remonte.
@@ -67,14 +76,10 @@ suspend fun loadHealthData(
 ): HealthData = supervisorScope {
     val nights = async { if (PERMISSION_READ_SLEEP in granted) readSleepByNight(client, from, to, zone) else emptyMap() }
     val steps = async { if (PERMISSION_READ_STEPS in granted) readStepsByDay(client, from, to, zone) else emptyMap() }
-    val heart = async { if (PERMISSION_READ_HEART in granted) readRestingHeartRate(client, from, to, zone) else emptyMap() }
-    val weight = async { if (PERMISSION_READ_WEIGHT in granted) readWeight(client, from, to, zone) else emptyMap() }
     val hrv = async { if (PERMISSION_READ_HRV in granted) readHrv(client, from, to, zone) else emptyMap() }
     HealthData(
         nights = nights.await(),
         steps = steps.await(),
-        heart = heart.await(),
-        weight = weight.await(),
         hrv = hrv.await(),
     )
 }
@@ -177,28 +182,6 @@ suspend fun readStepsByDay(
     out
 }
 
-/** Fréquence cardiaque au repos : moyenne des relevés du jour. */
-suspend fun readRestingHeartRate(
-    client: HealthConnectClient,
-    from: LocalDate,
-    to: LocalDate,
-    zone: ZoneId = ZoneId.systemDefault(),
-): Map<LocalDate, Double> = readDailyMean(
-    client, RestingHeartRateRecord::class, from, to, zone,
-    at = { it.time }, value = { it.beatsPerMinute.toDouble() },
-)
-
-/** Poids en kilos : moyenne des pesées du jour. */
-suspend fun readWeight(
-    client: HealthConnectClient,
-    from: LocalDate,
-    to: LocalDate,
-    zone: ZoneId = ZoneId.systemDefault(),
-): Map<LocalDate, Double> = readDailyMean(
-    client, WeightRecord::class, from, to, zone,
-    at = { it.time }, value = { it.weight.inKilograms },
-)
-
 /**
  * VFC (RMSSD, en ms) : moyenne des relevés, rattachés à la nuit comme le sommeil. Un relevé
  * pris après 18 h compte pour le lendemain : celui de 23 h appartient à la nuit qui s'achève
@@ -215,7 +198,7 @@ suspend fun readHrv(
     dayShift = Duration.ofHours(6),
 )
 
-// Cœur au repos, poids et VFC tiennent en quelques relevés par jour : la lecture brute
+// La VFC tient en quelques relevés par jour : la lecture brute
 // évite d'avoir à deviner le type de retour des agrégats.
 private suspend fun <T : Record> readDailyMean(
     client: HealthConnectClient,
@@ -257,11 +240,8 @@ fun demoHealthData(year: Int): HealthData {
     val today = LocalDate.now()
     val nights = mutableMapOf<LocalDate, Duration>()
     val steps = mutableMapOf<LocalDate, Long>()
-    val heart = mutableMapOf<LocalDate, Double>()
-    val weight = mutableMapOf<LocalDate, Double>()
     val screen = mutableMapOf<LocalDate, Double>()
     val hrv = mutableMapOf<LocalDate, Double>()
-    var kg = 72.0
     var activeYesterday = false
 
     var d = LocalDate.of(year, 1, 1)
@@ -278,16 +258,11 @@ fun demoHealthData(year: Int): HealthData {
             nights[d] = Duration.ofMinutes(minutes)
         }
         activeYesterday = active
-        // Une bonne nuit fait monter la VFC et descendre le cœur au repos : le score de
-        // récupération a ainsi de quoi varier en mode démo.
+        // Une bonne nuit fait monter la VFC : le score de récupération a ainsi de quoi
+        // varier en mode démo.
         val rested = nights[d]?.let { (it.toMinutes() - 430) / 60.0 } ?: 0.0
-        if (rnd.nextFloat() > 0.3f) heart[d] = 56.0 - 1.5 * rested + rnd.nextDouble(-4.0, 4.5)
         if (nights[d] != null && rnd.nextFloat() > 0.1f) {
             hrv[d] = (45.0 + 6.0 * rested + rnd.nextDouble(-9.0, 9.0)).coerceAtLeast(12.0)
-        }
-        if (rnd.nextFloat() > 0.5f) {
-            kg = (kg + rnd.nextDouble(-0.25, 0.22)).coerceIn(69.0, 76.0)
-            weight[d] = kg
         }
         // Plus d'écran le week-end ; aujourd'hui n'a pas de valeur, comme en vrai.
         if (d.isBefore(today)) {
@@ -296,5 +271,5 @@ fun demoHealthData(year: Int): HealthData {
         }
         d = d.plusDays(1)
     }
-    return HealthData(nights, steps, heart, weight, screen, hrv)
+    return HealthData(nights, steps, screen, hrv)
 }

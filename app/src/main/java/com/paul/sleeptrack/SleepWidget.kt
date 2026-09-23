@@ -108,7 +108,8 @@ private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetI
     val heightPx = (heightDp * density).toInt().coerceIn(60, 600)
 
     val metric = Prefs.widgetMetric(context)
-    val bitmap = renderStrip(metric, DataCache.load(context), widthPx, heightPx)
+    val data = DataCache.load(context).withRecovery(Prefs.recoveryConfig(context))
+    val bitmap = renderStrip(metric, data, widthPx, heightPx, goals = Prefs.goals(context))
 
     val open = PendingIntent.getActivity(
         context,

@@ -20,18 +20,21 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 ## Fonctionnalités
 
 - **Navigation par onglets** en bas de l'écran : Accueil, Grilles, Réglages.
-- **Accueil** : le score de récupération du matin, avec ses composantes, puis les dernières
-  semaines de sommeil, de pas et de récupération en bandes de cases (le rendu du widget). Toucher
-  une bande ouvre sa grille de l'année.
+- **Accueil** : le score de récupération du matin, avec ses composantes, puis des bandes des
+  dernières semaines pour les métriques choisies dans les réglages. Les cases des bandes se
+  touchent directement : une case ouvre le détail de son jour, « Année › » ouvre sa grille
+  complète.
 - **Score de récupération** (0-100, voir [Score de récupération](#score-de-récupération)) :
-  sommeil, variabilité cardiaque (VFC), cœur au repos et pas de la veille, comparés à ta propre
-  moyenne. Il a aussi sa grille annuelle, ses séries et sa semaine type.
-- Grille annuelle pour six métriques — sommeil, récupération, pas, cœur au repos, poids, temps d'écran — navigation par année, détail d'une journée au toucher.
+  sommeil, variabilité cardiaque (VFC) et pas de la veille, comparés à ta propre moyenne. Chaque
+  composante se désactive séparément dans les réglages ; le score est la moyenne de celles qui
+  restent actives.
+- Grille annuelle pour quatre métriques — sommeil, récupération, pas, temps d'écran — navigation par année, détail d'une journée au toucher.
 - Sommeil : sessions Health Connect, stades « éveillé » déduits, chevauchements entre montre et téléphone fusionnés, nuit rattachée à la date du réveil.
-- Pas : agrégation quotidienne Health Connect. Cœur au repos et poids : moyenne des relevés du jour.
+- Pas : agrégation quotidienne Health Connect.
 - Statistiques par métrique : moyenne, 7 derniers jours, record, tendance sur 30 jours.
-- **Séries** : jours consécutifs du bon côté de l'objectif (celui des réglages pour le sommeil,
-  10 000 pas, 58 bpm ou moins, moins de 3 h d'écran), série en cours et record de l'année.
+- **Objectifs réglables** : sommeil, pas, temps d'écran et seuil « au vert » de récupération se
+  règlent dans les réglages et pilotent à la fois les couleurs des grilles et les séries.
+- **Séries** : jours consécutifs du bon côté de l'objectif, série en cours et record de l'année.
   Un jour sans donnée coupe la série.
 - **Semaine type** : moyenne de chaque jour de la semaine, avec le jour le plus haut et le plus bas.
   Les barres se comparent entre elles et non à zéro, sans quoi l'écart réel serait invisible.
@@ -50,9 +53,15 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   passage à minuit par une alarme qui ne réveille pas le téléphone.
 - **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android, en
   SD (1920 px de large, 1080p) ou en HD (3840 px, 4K).
-- **Métriques masquables** : pas, cœur au repos, poids et temps d'écran se retirent du menu
-  principal depuis les réglages ; leurs autorisations (Health Connect comme l'accès aux données
-  d'utilisation) ne sont alors plus réclamées. Le sommeil et la récupération restent toujours affichés.
+- **Métriques masquables** : sommeil, récupération, pas et temps d'écran se retirent chacun du
+  menu principal depuis les réglages (il en reste toujours au moins une visible) ; leurs
+  autorisations (Health Connect comme l'accès aux données d'utilisation) ne sont alors plus
+  réclamées.
+- **Réglages détaillés** : à peu près tout se règle séparément — les composantes du score de
+  récupération et leur période de référence, les quatre objectifs, ce que montre l'accueil (carte,
+  jauge, détail des composantes, quelles bandes, leur hauteur, le détail au toucher, l'onglet
+  d'ouverture), les métriques visibles, et les affichages des grilles. Un bouton « Rétablir les
+  réglages par défaut » remet tout à zéro sans toucher aux données.
 - **Sauvegarde JSON** : export et import d'un fichier lisible tel quel, une ligne par jour
   (voir [Format de sauvegarde](#format-de-sauvegarde)), plus un export CSV pour les tableurs.
   L'app tient son propre historique, alimenté par ce qu'elle lit dans Health Connect et par ce qui
@@ -72,30 +81,31 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 | **Sommeil** | < 5h | 5-6h | 6-7h | 7-8h | 8h+ |
 | **Récupération** | < 34 | 34-50 | 50-67 | 67-80 | 80+ |
 | **Pas** | < 3k | 3-6k | 6-8k | 8-10k | 10k+ |
-| **Cœur au repos** | 70+ | 64-70 | 58-64 | 52-58 | < 52 |
 | **Temps d'écran** | 5h+ | 4-5h | 3-4h | 2-3h | < 2h |
 
-Le poids n'a pas de « bon » côté : il reçoit un dégradé bleu neutre, calé sur les quintiles
-de l'année affichée (du plus léger au plus lourd), avec les seuils réels en légende.
+Ces seuils sont ceux des objectifs par défaut (7 h de sommeil, 10 000 pas, 3 h d'écran, 67 de
+récupération) ; ils suivent les objectifs réglés dans les réglages.
 
 ## Score de récupération
 
-Un score par matin, rattaché comme la nuit à la date du réveil, moyenne pondérée de quatre
-composantes notées sur 100 :
+Un score par matin, rattaché comme la nuit à la date du réveil : la **moyenne des composantes
+actives**, chacune notée sur 100. Une composante se désactive séparément dans les réglages ; le
+score n'utilise alors que celles qui restent.
 
-| Composante | Poids | Note |
-| --- | --- | --- |
-| Sommeil | 30 % | durée de la nuit : 4 h ou moins → 0, 8 h ou plus → 100 |
-| VFC (RMSSD) | 35 % | écart à ta moyenne des 28 jours précédents, en écarts-types (sur le logarithme) : dans la moyenne → 60, deux écarts-types au-dessus → 100 |
-| Cœur au repos | 20 % | même principe, inversé : plus bas que d'habitude, c'est mieux ; sans historique, les seuils de la grille |
-| Pas de la veille | 15 % | charge : jusqu'à 1,2 fois ta moyenne des 28 jours → 100, puis baisse jusqu'à 40 au double |
+| Composante | Note |
+| --- | --- |
+| Sommeil | durée de la nuit : 4 h ou moins sous l'objectif → 0, 1 h au-dessus → 100 |
+| VFC (RMSSD) | écart à ta moyenne des jours précédents, en écarts-types (sur le logarithme) : dans la moyenne → 60, deux écarts-types au-dessus → 100 |
+| Pas de la veille | charge : jusqu'à 1,2 fois ta moyenne des jours précédents → 100, puis baisse jusqu'à 40 au double |
 
-- La VFC et le cœur se comparent à ta propre moyenne, qui demande 7 jours de relevés sur les 28
-  précédents : une VFC de 40 ms est excellente pour l'un, basse pour l'autre.
-- Une composante qui manque ne compte pas, les autres se partagent son poids. Il faut la nuit et au
-  moins une autre composante.
+- La VFC se compare à ta propre moyenne, qui demande 7 jours de relevés sur la période de
+  référence (14, 28 ou 56 jours, réglable) : une VFC de 40 ms est excellente pour l'un, basse pour
+  l'autre.
+- Il faut au moins deux composantes actives pour obtenir un score (une seule composante active
+  suffit si c'est la seule qui reste).
 - La VFC est lue dans Health Connect (enregistrée par la montre pendant la nuit) ; un relevé pris
-  après 18 h compte pour la nuit qui suit. Elle sert seulement au score, sans grille à elle.
+  après 18 h compte pour la nuit qui suit. Elle sert seulement au score, sans grille à elle ; sa
+  permission n'est réclamée que si la composante est active.
 - Le score n'est jamais stocké : il se recalcule à partir des séries, de l'archive comme d'un import.
 
 C'est un repère pour comparer tes matins entre eux, pas un avis médical.
@@ -108,8 +118,7 @@ C'est un repère pour comparer tes matins entre eux, pas un avis médical.
   "format": 1,
   "exportedAt": "2026-09-18",
   "days": [
-    { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123, "restingHeartRate": 56.2, "weightKg": 72.4,
-      "screenMinutes": 214, "hrvRmssd": 48.1 }
+    { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123, "screenMinutes": 214, "hrvRmssd": 48.1 }
   ]
 }
 ```
@@ -121,8 +130,9 @@ Les minutes de sommeil sont celles de la nuit **qui se termine** ce jour-là, co
 
 La lecture est volontairement tolérante, pour accepter ce que produisent d'autres applis :
 `days` peut aussi être un objet indexé par date, `sleepHours` remplace `sleepMinutes`, et les noms
-`heartRate`, `bpm`, `weight`, `step_count`, `hrv`, `rmssd` sont reconnus. Un import complète l'historique existant
-sans l'écraser ; il n'écrit rien dans Health Connect.
+`step_count`, `hrv`, `rmssd` sont reconnus. Le cœur au repos et le poids des anciennes sauvegardes
+sont ignorés : l'app ne les suit plus. Un import complète l'historique existant sans l'écraser ;
+il n'écrit rien dans Health Connect.
 
 L'historique local se vide depuis les réglages : la grille repart de ce que la prochaine lecture
 retrouvera dans Health Connect et Android, sans rien effacer de Health Connect.
@@ -166,9 +176,7 @@ sans « arrière-plan », le widget et les rappels se contentent des dernières 
 
 - `android.permission.health.READ_SLEEP`
 - `android.permission.health.READ_STEPS`
-- `android.permission.health.READ_RESTING_HEART_RATE`
-- `android.permission.health.READ_WEIGHT`
-- `android.permission.health.READ_HEART_RATE_VARIABILITY` (score de récupération)
+- `android.permission.health.READ_HEART_RATE_VARIABILITY` (score de récupération, si la composante VFC est active)
 - `android.permission.health.READ_HEALTH_DATA_HISTORY`
 - `android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND`
 - `android.permission.POST_NOTIFICATIONS` (rappels, demandée seulement si tu les actives)
