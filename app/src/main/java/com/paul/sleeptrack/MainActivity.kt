@@ -466,7 +466,7 @@ internal fun DemoBanner(onExitDemo: () -> Unit) {
 }
 
 @Composable
-private fun MainScreen(
+internal fun MainScreen(
     year: Int,
     metric: Metric,
     visibleMetrics: List<Metric>,

@@ -20,6 +20,8 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 ## Fonctionnalités
 
 - **Navigation par onglets** en bas de l'écran : Accueil, Grilles, Réglages.
+- **Deux thèmes** (voir [Thèmes](#thèmes)) : **Aube**, clair et chaud, avec sa variante sombre
+  **Nuit tombée**, et **Classique**, l'ancien thème sombre.
 - **Accueil** : le score de récupération du matin, avec ses composantes, puis des bandes des
   dernières semaines pour les métriques choisies dans les réglages. Les cases des bandes se
   touchent directement : une case ouvre le détail de son jour, « Année › » ouvre sa grille
@@ -52,7 +54,8 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   Pas de rafraîchissement périodique : il est redessiné quand ses données changent, et au
   passage à minuit par une alarme qui ne réveille pas le téléphone.
 - **Partage** : export de la grille de l'année en PNG, via le sélecteur de partage Android, en
-  SD (1920 px de large, 1080p) ou en HD (3840 px, 4K).
+  SD (3840 px de large, 4K) ou en HD (15 360 px, 16K). La 16K est dessinée et compressée par
+  bandes, sans jamais tenir l'image entière en mémoire : compter quelques secondes de préparation.
 - **Métriques masquables** : sommeil, récupération, pas et temps d'écran se retirent chacun du
   menu principal depuis les réglages (il en reste toujours au moins une visible) ; leurs
   autorisations (Health Connect comme l'accès aux données d'utilisation) ne sont alors plus
@@ -74,6 +77,30 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
   l'année, la case choisie et les données restent en place.
 - Mode démo si Health Connect n'est pas disponible.
 
+## Thèmes
+
+Réglages › Apparence : **Thème** Aube (par défaut) ou Classique, et **Mode** Système (par défaut),
+Clair ou Sombre. Le mode ne concerne qu'Aube : Clair affiche Aube, Sombre affiche Nuit tombée,
+Système suit le thème sombre d'Android. Le choix part dans l'export JSON et revient au défaut avec
+« Rétablir les réglages par défaut ».
+
+- **Aube** : fond crème, cartes blanches à l'ombre douce (un filet en Nuit tombée), accent
+  terracotta. Titres, score et verdict en Young Serif, le reste en Figtree avec des chiffres à
+  chasse fixe. Les deux polices sont embarquées (licences OFL dans `assets/licenses/`) : rien
+  n'est téléchargé.
+- **Pastilles** : en Aube, chaque jour est une pastille ronde dont le diamètre suit le niveau
+  (de 0,56 à 1 fois la cellule), second codage pour qui distingue mal les couleurs. Les deux
+  niveaux les plus bas ont un anneau, un jour sans donnée n'est qu'un anneau vide, un jour à venir
+  un petit point. Le toucher reste lu sur la cellule carrée entière.
+- **Lever de soleil** : la jauge de récupération devient un arc sur l'horizon, rempli jusqu'au
+  score, le soleil posé au bout et un trait au seuil « au vert ». Il se lève (1,1 s) au premier
+  affichage du jour.
+- **Classique** garde exactement le rendu d'avant : cases carrées, jauge circulaire, typographie
+  système.
+
+Le widget suit le thème ; sur Android 12 et plus, en mode Système, il bascule seul entre Aube et
+Nuit tombée. L'image de partage d'Aube garde toujours le fond clair.
+
 ## Échelles de couleurs
 
 | Métrique | ← moins bien | | | | mieux → |
@@ -84,7 +111,9 @@ téléphone. Les données ne sortent que par l'export, quand on le demande.
 | **Temps d'écran** | 5h+ | 4-5h | 3-4h | 2-3h | < 2h |
 
 Ces seuils sont ceux des objectifs par défaut (7 h de sommeil, 10 000 pas, 3 h d'écran, 67 de
-récupération) ; ils suivent les objectifs réglés dans les réglages.
+récupération) ; ils suivent les objectifs réglés dans les réglages. Les couleurs viennent du thème :
+du rouge au vert en Classique ; en Aube, du rose au vert sapin, plus foncées à mesure que le jour
+est bon (plus claires en Nuit tombée).
 
 ## Score de récupération
 
@@ -119,9 +148,13 @@ C'est un repère pour comparer tes matins entre eux, pas un avis médical.
   "exportedAt": "2026-09-18",
   "days": [
     { "date": "2026-01-01", "sleepMinutes": 431, "steps": 8123, "screenMinutes": 214, "hrvRmssd": 48.1 }
-  ]
+  ],
+  "settings": { "theme": "aube", "mode": "system" }
 }
 ```
+
+`settings` porte l'apparence (`theme` : `aube` ou `classique` ; `mode` : `system`, `light` ou
+`dark`). Il est facultatif à l'import, et une valeur inconnue y est ignorée.
 
 Chaque champ est facultatif : un fichier qui ne contient que `date` et `steps` s'importe très bien.
 `hrvRmssd` est la VFC nocturne en millisecondes ; le score de récupération n'est pas exporté, il se
@@ -151,8 +184,13 @@ Puis :
 ./gradlew assembleDebug
 ```
 
-L'APK est produit dans `app/build/outputs/apk/debug/`. Les tests du score de récupération
-tournent sur la JVM, sans téléphone : `./gradlew testDebugUnitTest`.
+L'APK est produit dans `app/build/outputs/apk/debug/`. Les tests (score de récupération,
+géométrie des pastilles, écriture du PNG par bandes) tournent sur la JVM, sans téléphone :
+`./gradlew testDebugUnitTest`.
+
+Les previews d'Android Studio (Accueil, Grilles et Réglages en Aube et Nuit tombée, lever de
+soleil, pastilles) sont dans `app/src/debug/java/.../Previews.kt` ; l'outillage de preview
+n'entre que dans l'APK de debug.
 
 Sous Windows, `build.ps1` compile avec l'outillage rangé dans `tools/` (JDK, Gradle et SDK
 embarqués) et laisse l'APK à la racine (`Sommeil.apk`) ; `install.ps1` l'installe avec adb
