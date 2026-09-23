@@ -114,6 +114,8 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
     val c = LocalSleepColors.current
     val series = data.series(metric)
     val averages = weekAverages(series)
+    // Aube : des barres pleines arrondies en haut seulement, posées sur leur base.
+    val barShape = if (c.isAube) RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp) else RoundedCornerShape(5.dp)
 
     Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Semaine type", color = c.ink, style = sleepText(TextRole.CardTitle, classicWeight = FontWeight.SemiBold))
@@ -158,7 +160,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                         Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(fraction)
-                            .background(scale.colorOf(value), RoundedCornerShape(5.dp))
+                            .background(scale.colorOf(value), barShape)
                     )
                     Spacer(Modifier.height(5.dp))
                     Text(

@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -443,7 +444,7 @@ private fun MainScreen(
                     year = year,
                     selected = selected,
                     onSelect = { selected = it },
-                    colorAt = { day -> series[day]?.let(scale::colorOf) },
+                    levelAt = { day -> series[day]?.let(scale::levelOf) },
                     minPitch = minPitch,
                 )
                 if (display.legend) Legend(metric, scale)
@@ -648,7 +649,8 @@ internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Me
 internal fun DetailLine(label: String, value: String, color: Color?) {
     val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(14.dp).background(color ?: c.surface2, RoundedCornerShape(4.dp)))
+        // En Aube, la pastille du niveau ; en Classique, le petit carré d'avant.
+        Box(Modifier.size(14.dp).background(color ?: c.surface2, if (c.isAube) CircleShape else RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(10.dp))
         Text(label, color = c.ink2, modifier = Modifier.weight(1f), style = sleepText(TextRole.Body, 14.sp))
         Text(value, color = color ?: c.ink2, style = sleepText(TextRole.Label, 14.sp, FontWeight.SemiBold))

@@ -140,7 +140,7 @@ private fun HomeStrip(
             RecentHeatmap(
                 selected = selected,
                 onSelect = onSelect,
-                colorAt = { day -> series[day]?.let(scale::colorOf) },
+                levelAt = { day -> series[day]?.let(scale::levelOf) },
                 height = height,
                 today = today,
             )
