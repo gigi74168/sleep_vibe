@@ -53,6 +53,8 @@ object Prefs {
 
     const val THEME = "theme"
     const val THEME_MODE = "theme_mode"
+    /** Jour du dernier lever de soleil animé : l'animation ne se joue qu'une fois par jour. */
+    const val SUNRISE_DAY = "sunrise_day"
 
     const val DEFAULT_EVENING_HOUR = 22
     const val DEFAULT_WEEKLY_HOUR = 19
@@ -97,6 +99,14 @@ object Prefs {
         settings.optString("mode").takeIf { v -> ThemeMode.entries.any { it.key == v } }
             ?.let { editor.putString(THEME_MODE, it) }
         editor.apply()
+    }
+
+    /** Vrai la première fois qu'on le demande pour [day], faux ensuite. */
+    fun claimSunrise(context: Context, day: LocalDate): Boolean {
+        val prefs = of(context)
+        if (prefs.getString(SUNRISE_DAY, null) == day.toString()) return false
+        prefs.edit().putString(SUNRISE_DAY, day.toString()).apply()
+        return true
     }
 
     fun eveningEnabled(context: Context) = of(context).getBoolean(EVENING_ENABLED, false)

@@ -1,7 +1,9 @@
 package com.paul.sleeptrack
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -16,18 +18,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.paul.sleeptrack.ui.theme.AubeDimens
+import com.paul.sleeptrack.ui.theme.AubeType
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import com.paul.sleeptrack.ui.theme.TextRole
 import com.paul.sleeptrack.ui.theme.aubeOr
 import com.paul.sleeptrack.ui.theme.sleepText
 import java.time.LocalDate
-
-private val VERDICTS = listOf("Au ralenti", "Fatigué", "Correct", "Bien récupéré", "En pleine forme")
 
 /** L'accueil : la récupération du matin, puis les dernières semaines des métriques choisies. */
 @Composable
@@ -163,6 +166,10 @@ private fun RecoveryCard(
     // La nuit dernière n'est pas toujours déjà synchronisée : on se rabat sur celle d'avant.
     val latest = listOf(today, today.minusDays(1))
         .firstNotNullOfOrNull { day -> recent.recovery[day]?.let { day to it } }
+    if (c.isAube) {
+        AubeRecoveryCard(recent, today, latest, goals, showGauge, showBreakdown, missingHrv, showNotes, onRequestPermissions)
+        return
+    }
     val scale = remember(goals, c) { scaleFor(Metric.RECOVERY, goals, c.levels) }
 
     Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -254,6 +261,114 @@ private fun RecoveryCard(
     }
 }
 
+/** Aube : la carte centrée autour du lever de soleil, verdict et légende dessous. */
+@Composable
+private fun AubeRecoveryCard(
+    recent: HealthData,
+    today: LocalDate,
+    latest: Pair<LocalDate, RecoveryScore>?,
+    goals: Goals,
+    showGauge: Boolean,
+    showBreakdown: Boolean,
+    missingHrv: Boolean,
+    showNotes: Boolean,
+    onRequestPermissions: () -> Unit,
+) {
+    val c = LocalSleepColors.current
+    val context = LocalContext.current
+    // Le lever de soleil ne s'anime qu'au premier affichage du jour.
+    val animate = remember(today) { Prefs.claimSunrise(context, today) }
+    val noComponent = recent.recoveryConfig.components.isEmpty()
+
+    Column(
+        Modifier.fillMaxWidth().padding(AubeDimens.CardPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("RÉCUPÉRATION", color = c.ink2, style = AubeType.overline)
+        if (noComponent) {
+            Text(
+                "Aucune composante active : choisis-en au moins une dans les réglages du score " +
+                    "de récupération.",
+                color = c.ink2,
+                style = AubeType.body,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            val score = latest?.second?.total
+            if (showGauge || score == null) {
+                SunriseGauge(score, goals.recoveryGood, animate = animate)
+            } else {
+                Text("$score", color = c.ink, style = AubeType.score)
+            }
+            if (latest == null) {
+                Text(
+                    "Le soleil n'est pas encore levé : ton premier score arrivera après une nuit " +
+                        "synchronisée.",
+                    color = c.ink2,
+                    style = AubeType.body,
+                    textAlign = TextAlign.Center,
+                )
+            } else {
+                val (day, value) = latest
+                if (showGauge) {
+                    Text(VERDICTS[recoveryLevel(value.total, goals.recoveryGood)], color = c.ink, style = AubeType.verdict)
+                }
+                Text(
+                    morningLegend(day, today),
+                    color = c.ink2,
+                    style = AubeType.caption,
+                    textAlign = TextAlign.Center,
+                )
+                if (showBreakdown) {
+                    Box(Modifier.fillMaxWidth().padding(top = 4.dp)) { RecoveryBreakdown(day, value, recent, goals) }
+                }
+            }
+        }
+
+        if (missingHrv) {
+            Text(
+                "Sans la variabilité cardiaque, le score repose sur les autres composantes actives : " +
+                    "autorise-la dans Health Connect pour le compléter.",
+                color = c.ink2,
+                style = AubeType.body,
+                textAlign = TextAlign.Center,
+            )
+            OutlinedButton(onClick = onRequestPermissions, modifier = Modifier.heightIn(min = AubeDimens.MinTouch)) {
+                Text("Autoriser la VFC", color = c.ink)
+            }
+        } else if (showNotes && recent.hrv.isEmpty() && RecoveryComponent.HRV in recent.recoveryConfig.components) {
+            Text(
+                "Aucune VFC trouvée dans Health Connect : ta montre n'en enregistre peut-être " +
+                    "pas. Le score se calcule sans elle.",
+                color = c.ink3,
+                style = AubeType.caption,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (showNotes) {
+            Text(
+                "Chaque composante se compare à tes semaines précédentes ; une grosse journée de " +
+                    "pas la veille fait baisser le score. Indicatif, pas médical.",
+                color = c.ink3,
+                style = AubeType.caption,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** « Score du matin · nuit du 22 au 23 ». */
+private fun morningLegend(day: LocalDate, today: LocalDate): String {
+    fun dayNumber(d: LocalDate) = if (d.dayOfMonth == 1) "1er" else "${d.dayOfMonth}"
+    val night = "nuit du ${dayNumber(day.minusDays(1))} au ${dayNumber(day)}"
+    return if (day == today) {
+        "Score du matin · $night"
+    } else {
+        "Score d'hier · $night · la dernière n'est pas encore là"
+    }
+}
+
 /** Les composantes actives d'un score : la valeur mesurée, puis ce qu'elle rapporte sur 100. */
 @Composable
 internal fun RecoveryBreakdown(day: LocalDate, score: RecoveryScore, data: HealthData, goals: Goals) {
@@ -277,6 +392,37 @@ internal fun RecoveryBreakdown(day: LocalDate, score: RecoveryScore, data: Healt
 @Composable
 private fun ComponentLine(label: String, measured: String?, points: Int?, scale: Scale) {
     // Une valeur sans points : mesurée, mais la ligne de base n'a pas encore assez de jours.
+    val c = LocalSleepColors.current
+    if (c.isAube) {
+        // Nom, valeur mesurée → points, et une barre de 6 dp sur sa piste.
+        val detail = when {
+            measured == null -> "Aucune donnée"
+            points == null -> "$measured → moyenne en cours"
+            else -> "$measured → $points"
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = c.ink2, style = AubeType.body, modifier = Modifier.weight(1f))
+                Text(detail, color = c.ink, style = AubeType.label)
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(c.surface2, RoundedCornerShape(3.dp))
+            ) {
+                if (points != null && points > 0) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(points / 100f)
+                            .height(6.dp)
+                            .background(scale.colorOf(points.toDouble()), RoundedCornerShape(3.dp))
+                    )
+                }
+            }
+        }
+        return
+    }
     val detail = when {
         measured == null -> "Aucune donnée"
         points == null -> "$measured · moyenne en cours"
