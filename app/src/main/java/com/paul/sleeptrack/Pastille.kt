@@ -1,8 +1,11 @@
 package com.paul.sleeptrack
 
+import android.graphics.Paint
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.paul.sleeptrack.ui.theme.SleepColors
 
@@ -88,8 +91,61 @@ fun DrawScope.drawSelectionMark(center: Offset, side: Float, c: SleepColors, sca
     drawCircle(c.selection, Pastille.markRadius(side, offset, stroke) * scale, center, style = Stroke(stroke))
 }
 
-private fun DrawScope.drawRing(color: androidx.compose.ui.graphics.Color, center: Offset, from: Float, to: Float) {
+private fun DrawScope.drawRing(color: Color, center: Offset, from: Float, to: Float) {
     val width = to - from
     if (width <= 0f) return
     drawCircle(color, (from + to) / 2f, center, style = Stroke(width))
+}
+
+// ------------------------------------------------ Même dessin, pour le widget et le partage
+
+/**
+ * La pastille sur un Canvas Android, pour les bitmaps. [density] convertit le côté en dp pour
+ * la règle de l'anneau ; [brush] est réutilisé d'une case à l'autre.
+ */
+fun android.graphics.Canvas.drawPastilleBitmap(
+    cx: Float,
+    cy: Float,
+    side: Float,
+    content: CellContent,
+    c: SleepColors,
+    density: Float,
+    brush: Paint,
+) {
+    val half = side / 2f
+    brush.style = Paint.Style.FILL
+    when (content) {
+        is CellContent.Level -> {
+            val r = Pastille.radius(content.level, side)
+            brush.color = c.levels[content.level].toArgb()
+            if (Pastille.hasRing(content.level, side / density)) {
+                drawCircle(cx, cy, r * Pastille.FILL_TO, brush)
+                ringBitmap(cx, cy, r * Pastille.RING_FROM, r * Pastille.RING_TO, c.rings[content.level], brush)
+            } else {
+                drawCircle(cx, cy, r, brush)
+            }
+        }
+        CellContent.Empty -> ringBitmap(cx, cy, half * Pastille.EMPTY_FROM, half * Pastille.EMPTY_TO, c.emptyRing, brush)
+        CellContent.Future -> {
+            brush.color = c.outline.toArgb()
+            drawCircle(cx, cy, half * Pastille.FUTURE_DOT, brush)
+        }
+    }
+}
+
+/** Le repère d'aujourd'hui, sur un Canvas Android. */
+fun android.graphics.Canvas.drawTodayMarkBitmap(cx: Float, cy: Float, side: Float, c: SleepColors, density: Float, brush: Paint) {
+    val stroke = Pastille.TODAY_STROKE_DP * density
+    val r = Pastille.markRadius(side, Pastille.TODAY_OFFSET_DP * density, stroke)
+    ringBitmap(cx, cy, r - stroke / 2f, r + stroke / 2f, c.today, brush)
+}
+
+private fun android.graphics.Canvas.ringBitmap(cx: Float, cy: Float, from: Float, to: Float, color: Color, brush: Paint) {
+    val width = to - from
+    if (width <= 0f) return
+    brush.color = color.toArgb()
+    brush.style = Paint.Style.STROKE
+    brush.strokeWidth = width
+    drawCircle(cx, cy, (from + to) / 2f, brush)
+    brush.style = Paint.Style.FILL
 }

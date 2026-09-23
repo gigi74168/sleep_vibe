@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import androidx.core.content.FileProvider
 import com.paul.sleeptrack.ui.theme.AubeTokens
+import com.paul.sleeptrack.ui.theme.ThemeChoice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -12,13 +13,19 @@ import java.io.FileOutputStream
 
 /**
  * Définitions proposées au partage. C'est la largeur de l'image qui suit le format vidéo
- * (1920 px pour du 1080p, 3840 px pour de la 4K) ; la hauteur découle de la mise en page,
- * environ 1210 et 2420 px.
+ * (3840 px pour de la 4K, 15 360 px pour de la 16K) ; la hauteur découle de la mise en page,
+ * environ 2420 et 9680 px.
  */
 enum class ShareQuality(val label: String, val widthPx: Int) {
-    SD("SD · 1080p", 1920),
-    HD("HD · 4K", 3840),
+    SD("SD · 4K", 3840),
+    HD("HD · 16K", 15_360),
 }
+
+/**
+ * Au-delà, l'image ne passe plus par un bitmap entier (la 16K en demanderait près de 600 Mo) :
+ * elle est dessinée et compressée par bandes.
+ */
+private const val MAX_BITMAP_PIXELS = 16_000_000L
 
 /**
  * Exporte la grille de l'année en PNG et ouvre le sélecteur de partage Android.
@@ -26,15 +33,25 @@ enum class ShareQuality(val label: String, val widthPx: Int) {
  * l'utilisateur qui décide de sa destination.
  */
 suspend fun shareYearImage(context: Context, year: Int, metric: Metric, data: HealthData, quality: ShareQuality) {
-    // Le rendu et l'encodage PNG bloqueraient l'interface, jusqu'à quelques secondes en
-    // 4K : ils se font à côté, seul l'envoi du sélecteur revient sur le fil principal.
+    // Le rendu et l'encodage PNG bloqueraient l'interface, plusieurs secondes en 16K : ils se
+    // font à côté, seul l'envoi du sélecteur revient sur le fil principal.
     val uri = withContext(Dispatchers.Default) {
-        val bitmap = renderYearCard(year, metric, data, Prefs.goals(context), AubeTokens.Classique, quality.widthPx)
-        val file = try {
-            writePng(context, bitmap, "sleeptrack-${metric.name.lowercase()}-$year.png")
-        } finally {
-            // Près de 40 Mo en 4K : rendus tout de suite plutôt qu'au prochain ramassage.
-            bitmap.recycle()
+        // En Aube, l'image garde toujours le fond clair de la maquette, même en Nuit tombée.
+        val colors = if (Prefs.appearance(context).theme == ThemeChoice.AUBE) AubeTokens.Aube else AubeTokens.Classique
+        val card = YearCard(year, metric, data, Prefs.goals(context), bitmapStyle(context, colors), quality.widthPx)
+        val file = pngFile(context, "sleeptrack-${metric.name.lowercase()}-$year.png")
+        FileOutputStream(file).buffered(1 shl 16).use { out ->
+            if (card.width.toLong() * card.height <= MAX_BITMAP_PIXELS) {
+                val bitmap = card.toBitmap()
+                try {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                } finally {
+                    // Près de 40 Mo en 4K : rendus tout de suite plutôt qu'au prochain ramassage.
+                    bitmap.recycle()
+                }
+            } else {
+                card.writePng(out)
+            }
         }
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
@@ -51,12 +68,10 @@ suspend fun shareYearImage(context: Context, year: Int, metric: Metric, data: He
     )
 }
 
-private fun writePng(context: Context, bitmap: Bitmap, name: String): File {
+private fun pngFile(context: Context, name: String): File {
     val dir = File(context.cacheDir, "partage").apply { mkdirs() }
     // Un seul export à la fois : on nettoie les précédents pour ne pas laisser
     // grossir le cache au fil des partages.
     dir.listFiles()?.forEach { it.delete() }
-    val file = File(dir, name)
-    FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    return file
+    return File(dir, name)
 }

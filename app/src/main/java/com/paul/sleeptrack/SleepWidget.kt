@@ -7,9 +7,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.graphics.drawable.Icon
+import android.os.Build
 import android.os.Bundle
 import android.widget.RemoteViews
 import com.paul.sleeptrack.ui.theme.AubeTokens
+import com.paul.sleeptrack.ui.theme.SleepColors
+import com.paul.sleeptrack.ui.theme.ThemeChoice
+import com.paul.sleeptrack.ui.theme.ThemeMode
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -18,7 +24,8 @@ private const val ACTION_MIDNIGHT = "com.paul.sleeptrack.WIDGET_MIDNIGHT"
 /**
  * Widget d'écran d'accueil : les dernières semaines de la métrique choisie dans l'app.
  * Il dessine à partir du cache local, donc il reste lisible même quand Health Connect
- * n'est pas interrogeable en arrière-plan.
+ * n'est pas interrogeable en arrière-plan. Il suit le thème de l'app : en Aube, clair le
+ * jour et Nuit tombée quand Android passe en sombre (ou selon le mode choisi).
  *
  * Pas de rafraîchissement périodique : l'image ne dépend que du cache, de la métrique et
  * de la date. L'app et les rappels le redessinent quand le cache change ; il reste le
@@ -110,7 +117,10 @@ private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetI
 
     val metric = Prefs.widgetMetric(context)
     val data = DataCache.load(context).withRecovery(Prefs.recoveryConfig(context))
-    val bitmap = renderStrip(metric, data, widthPx, heightPx, AubeTokens.Classique, goals = Prefs.goals(context))
+    val goals = Prefs.goals(context)
+    val appearance = Prefs.appearance(context)
+    fun draw(colors: SleepColors) =
+        renderStrip(metric, data, widthPx, heightPx, bitmapStyle(context, colors), goals = goals)
 
     val open = PendingIntent.getActivity(
         context,
@@ -120,7 +130,21 @@ private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetI
     )
 
     val views = RemoteViews(context.packageName, R.layout.widget_sleep).apply {
-        setImageViewBitmap(R.id.widget_image, bitmap)
+        if (appearance.theme == ThemeChoice.AUBE && appearance.mode == ThemeMode.SYSTEM &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        ) {
+            // Android 12 et plus : une image de jour et une de nuit ; le système prend celle
+            // du thème en cours, sans avoir à redessiner quand il bascule.
+            setIcon(
+                R.id.widget_image, "setImageIcon",
+                Icon.createWithBitmap(draw(AubeTokens.Aube)),
+                Icon.createWithBitmap(draw(AubeTokens.NuitTombee)),
+            )
+        } else {
+            val night = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            setImageViewBitmap(R.id.widget_image, draw(AubeTokens.resolve(appearance.theme, appearance.mode, night)))
+        }
         setOnClickPendingIntent(R.id.widget_image, open)
     }
     manager.updateAppWidget(appWidgetId, views)

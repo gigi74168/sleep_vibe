@@ -509,16 +509,32 @@ private fun MainScreen(
             if (display.showShare) {
                 Box {
                     var shareMenu by remember { mutableStateOf(false) }
-                    // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
+                    // Un seul rendu à la fois : la 16K prend plusieurs secondes et de la mémoire.
                     var sharing by remember { mutableStateOf(false) }
+                    // Pendant le rendu, le bouton montre un petit chargement.
+                    val shareLabel: @Composable () -> Unit = {
+                        if (sharing) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                color = if (c.isAube) c.accent else c.ink2,
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(
+                            if (sharing) "Préparation…" else "Partager",
+                            color = if (c.isAube) c.ink else c.ink2,
+                            style = sleepText(TextRole.Label, 14.sp),
+                        )
+                    }
                     if (c.isAube) {
-                        OutlinedButton(onClick = { shareMenu = true }, border = BorderStroke(1.dp, c.outline)) {
-                            Text("Partager", color = c.ink, style = AubeType.label)
-                        }
+                        OutlinedButton(
+                            onClick = { shareMenu = true },
+                            enabled = !sharing,
+                            border = BorderStroke(1.dp, c.outline),
+                        ) { shareLabel() }
                     } else {
-                        TextButton(onClick = { shareMenu = true }) {
-                            Text("Partager", color = c.ink2, style = sleepText(TextRole.Label, 14.sp))
-                        }
+                        TextButton(onClick = { shareMenu = true }, enabled = !sharing) { shareLabel() }
                     }
                     DropdownMenu(
                         expanded = shareMenu,
