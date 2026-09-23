@@ -9,7 +9,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import com.paul.sleeptrack.ui.theme.AubeDimens
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.TextRole
+import com.paul.sleeptrack.ui.theme.aubeOr
+import com.paul.sleeptrack.ui.theme.sleepText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.DayOfWeek
@@ -111,15 +115,15 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
     val series = data.series(metric)
     val averages = weekAverages(series)
 
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Semaine type", color = c.ink, fontWeight = FontWeight.SemiBold)
+    Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Semaine type", color = c.ink, style = sleepText(TextRole.CardTitle, classicWeight = FontWeight.SemiBold))
 
         if (averages.size < 7 || series.size < 21) {
             Text(
                 "Il faut environ trois semaines pour que la moyenne de chaque jour veuille dire " +
                     "quelque chose (${metric.countLabel(series.size)} pour l'instant).",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
             return@Column
         }
@@ -145,7 +149,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                     Text(
                         compactValue(metric, value),
                         color = c.ink2,
-                        fontSize = 9.sp,
+                        style = sleepText(TextRole.Axis, 9.sp),
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -160,7 +164,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                     Text(
                         day.getDisplayName(TextStyle.NARROW, Locale.FRENCH).uppercase(),
                         color = c.ink2,
-                        fontSize = 11.sp,
+                        style = sleepText(TextRole.Axis, 11.sp),
                     )
                 }
             }
@@ -169,7 +173,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
         Text(
             weekSentence(metric, low.key, low.value, high.key, high.value),
             color = c.ink2,
-            fontSize = 13.sp,
+            style = sleepText(TextRole.Body, 13.sp),
         )
 
         if (showNote) {
@@ -177,7 +181,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                 "Les barres se comparent entre elles, pas à zéro : c'est l'écart entre tes jours " +
                     "qui est dessiné, pas leur valeur absolue.",
                 color = c.ink3,
-                fontSize = 11.sp,
+                style = sleepText(TextRole.Caption, 11.sp),
             )
         }
     }

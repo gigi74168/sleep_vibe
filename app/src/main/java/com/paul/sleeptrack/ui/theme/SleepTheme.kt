@@ -24,7 +24,12 @@ fun SleepTheme(colors: SleepColors, content: @Composable () -> Unit) {
     val scheme = remember(colors) { colorSchemeOf(colors) }
     SystemBars(colors)
     CompositionLocalProvider(LocalSleepColors provides colors) {
-        MaterialTheme(colorScheme = scheme, content = content)
+        if (colors.isAube) {
+            MaterialTheme(colorScheme = scheme, typography = AubeType.typography, shapes = AubeType.shapes, content = content)
+        } else {
+            // Classique : la typographie et les formes par défaut, comme avant.
+            MaterialTheme(colorScheme = scheme, content = content)
+        }
     }
 }
 

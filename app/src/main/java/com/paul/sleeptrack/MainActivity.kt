@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.HealthConnectClient
@@ -32,9 +33,14 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.paul.sleeptrack.ui.theme.AubeDimens
 import com.paul.sleeptrack.ui.theme.AubeTokens
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import com.paul.sleeptrack.ui.theme.SleepTheme
+import com.paul.sleeptrack.ui.theme.TextRole
+import com.paul.sleeptrack.ui.theme.aubeCard
+import com.paul.sleeptrack.ui.theme.aubeOr
+import com.paul.sleeptrack.ui.theme.sleepText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -229,7 +235,7 @@ private fun SleepApp(onAppearanceChange: () -> Unit) {
                 .fillMaxSize()
                 .padding(insets)
                 .verticalScroll(scroll)
-                .padding(16.dp)
+                .padding(aubeOr(16.dp, AubeDimens.ScreenMargin))
         ) {
             when (val s = state) {
                 UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
@@ -333,7 +339,12 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
 internal fun DemoBanner(onExitDemo: () -> Unit) {
     val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Mode démo (données fictives)", color = c.notice, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(
+            "Mode démo (données fictives)",
+            color = c.notice,
+            style = sleepText(TextRole.Caption, 13.sp),
+            modifier = Modifier.weight(1f),
+        )
         TextButton(onClick = onExitDemo) { Text("Quitter", color = c.ink) }
     }
 }
@@ -375,9 +386,9 @@ private fun MainScreen(
         maxOf(display.cellSize, fromHeight).dp
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(aubeOr(12.dp, AubeDimens.CardGap))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Grilles", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Grilles", color = c.ink, style = sleepText(TextRole.ScreenTitle, 20.sp, FontWeight.Bold))
             Spacer(Modifier.weight(1f))
             if (display.showShare) {
                 Box {
@@ -385,7 +396,7 @@ private fun MainScreen(
                     // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
                     var sharing by remember { mutableStateOf(false) }
                     TextButton(onClick = { shareMenu = true }) {
-                        Text("Partager", color = c.ink2, fontSize = 14.sp)
+                        Text("Partager", color = c.ink2, style = sleepText(TextRole.Label, 14.sp))
                     }
                     DropdownMenu(
                         expanded = shareMenu,
@@ -420,13 +431,13 @@ private fun MainScreen(
         if (visibleMetrics.size > 1) MetricSwitch(metric, visibleMetrics, onMetric)
 
         Panel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ArrowButton("‹", enabled = true) { onYear(year - 1) }
-                    Text("$year", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = c.ink)
+                    Text("$year", color = c.ink, style = sleepText(TextRole.CardTitle, 34.sp, FontWeight.Bold))
                     ArrowButton("›", enabled = year < currentYear) { onYear(year + 1) }
                     Spacer(Modifier.weight(1f))
-                    Text(metric.countLabel(series.size), fontSize = 18.sp, color = c.ink2)
+                    Text(metric.countLabel(series.size), color = c.ink2, style = sleepText(TextRole.Caption, 18.sp))
                 }
                 YearHeatmap(
                     year = year,
@@ -445,12 +456,12 @@ private fun MainScreen(
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Le temps d'écran ne vient pas de Health Connect mais d'Android. Autorise " +
                             "Sleep Track dans « Accès aux données d'utilisation », puis reviens ici.",
                         color = c.ink2,
-                        fontSize = 13.sp,
+                        style = sleepText(TextRole.Body, 13.sp),
                     )
                     OutlinedButton(onClick = { openUsageAccessSettings(context) }) {
                         Text("Ouvrir le réglage", color = c.ink)
@@ -460,7 +471,7 @@ private fun MainScreen(
                             "Android n'en garde qu'une dizaine de jours : l'historique commence là, " +
                                 "puis s'allonge à chaque ouverture de l'app.",
                             color = c.ink3,
-                            fontSize = 11.sp,
+                            style = sleepText(TextRole.Caption, 11.sp),
                         )
                     }
                 }
@@ -505,8 +516,8 @@ private fun MainScreen(
         val relevantMissing = remember(missing, requested) { requested.intersect(missing) }
         if (relevantMissing.isNotEmpty() && !demo) {
             Panel {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(missingText(relevantMissing), color = c.ink2, fontSize = 13.sp)
+                Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(missingText(relevantMissing), color = c.ink2, style = sleepText(TextRole.Body, 13.sp))
                     OutlinedButton(onClick = onRequestPermissions) {
                         Text("Compléter les autorisations", color = c.ink)
                     }
@@ -559,12 +570,15 @@ internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metr
                 Text(
                     entry.label,
                     color = if (active) c.ink else c.ink2,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = when {
-                        entries.size > 5 -> 11.sp
-                        entries.size > 4 -> 12.sp
-                        else -> 14.sp
-                    },
+                    style = sleepText(
+                        TextRole.Label,
+                        when {
+                            entries.size > 5 -> 11.sp
+                            entries.size > 4 -> 12.sp
+                            else -> 14.sp
+                        },
+                        if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -586,25 +600,31 @@ internal fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) 
     }
 }
 
+/** Les rayons d'Aube : carte principale, section ou grille, tuile. */
+internal enum class CardKind(val aubeRadius: Dp) {
+    Main(AubeDimens.CardRadius),
+    Section(AubeDimens.SectionRadius),
+    Tile(AubeDimens.TileRadius),
+}
+
 @Composable
-internal fun Panel(content: @Composable () -> Unit) {
+internal fun Panel(kind: CardKind = CardKind.Section, content: @Composable () -> Unit) {
     val c = LocalSleepColors.current
+    val base = Modifier.fillMaxWidth()
     Box(
-        Modifier
-            .fillMaxWidth()
-            .background(c.surface, RoundedCornerShape(20.dp))
+        if (c.isAube) base.aubeCard(c, kind.aubeRadius) else base.background(c.surface, RoundedCornerShape(20.dp))
     ) { content() }
 }
 
 @Composable
 internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Metric>, goals: Goals) {
     val c = LocalSleepColors.current
-    Panel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Panel(CardKind.Main) {
+        Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 day.format(LongDate).replaceFirstChar { it.uppercase() },
                 color = c.ink,
-                fontWeight = FontWeight.SemiBold,
+                style = sleepText(TextRole.CardTitle, classicWeight = FontWeight.SemiBold),
             )
             visibleMetrics.forEach { entry ->
                 val value = data.series(entry)[day]
@@ -616,7 +636,7 @@ internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Me
             }
             if (Metric.RECOVERY in visibleMetrics) {
                 data.recovery[day]?.let { score ->
-                    Text("Détail de la récupération", color = c.ink2, fontSize = 12.sp)
+                    Text("Détail de la récupération", color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
                     RecoveryBreakdown(day, score, data, goals)
                 }
             }
@@ -630,14 +650,14 @@ internal fun DetailLine(label: String, value: String, color: Color?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(14.dp).background(color ?: c.surface2, RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(10.dp))
-        Text(label, color = c.ink2, modifier = Modifier.weight(1f), fontSize = 14.sp)
-        Text(value, color = color ?: c.ink2, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text(label, color = c.ink2, modifier = Modifier.weight(1f), style = sleepText(TextRole.Body, 14.sp))
+        Text(value, color = color ?: c.ink2, style = sleepText(TextRole.Label, 14.sp, FontWeight.SemiBold))
     }
 }
 
 @Composable
 private fun StatRow(left: StatTile, right: StatTile) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(aubeOr(12.dp, AubeDimens.CardGap))) {
         StatTileView(left, Modifier.weight(1f))
         StatTileView(right, Modifier.weight(1f))
     }
@@ -646,10 +666,15 @@ private fun StatRow(left: StatTile, right: StatTile) {
 @Composable
 private fun StatTileView(tile: StatTile, modifier: Modifier) {
     val c = LocalSleepColors.current
-    Box(modifier.background(c.surface, RoundedCornerShape(16.dp)).padding(14.dp)) {
+    val shaped = if (c.isAube) {
+        modifier.aubeCard(c, AubeDimens.TileRadius).padding(AubeDimens.TilePadding)
+    } else {
+        modifier.background(c.surface, RoundedCornerShape(16.dp)).padding(14.dp)
+    }
+    Box(shaped) {
         Column {
-            Text(tile.label, color = c.ink2, fontSize = 12.sp)
-            Text(tile.value, color = tile.color, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(tile.label, color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
+            Text(tile.value, color = tile.color, style = sleepText(TextRole.Value, 22.sp, FontWeight.Bold), maxLines = 1)
         }
     }
 }
@@ -657,7 +682,7 @@ private fun StatTileView(tile: StatTile, modifier: Modifier) {
 @Composable
 private fun EmptyNote(text: String) {
     val c = LocalSleepColors.current
-    Text(text, color = c.ink2, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+    Text(text, color = c.ink2, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, style = sleepText(TextRole.Body))
 }
 
 @Composable
@@ -668,8 +693,8 @@ private fun Message(title: String, body: String, action: String, onAction: () ->
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(title, color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text(body, color = c.ink2, fontSize = 15.sp, textAlign = TextAlign.Center)
+        Text(title, color = c.ink, textAlign = TextAlign.Center, style = sleepText(TextRole.Verdict, 22.sp, FontWeight.Bold))
+        Text(body, color = c.ink2, textAlign = TextAlign.Center, style = sleepText(TextRole.Body, 15.sp))
         Button(
             onClick = onAction,
             colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = c.onAccent),

@@ -20,7 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.paul.sleeptrack.ui.theme.AubeDimens
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.TextRole
+import com.paul.sleeptrack.ui.theme.aubeOr
+import com.paul.sleeptrack.ui.theme.sleepText
 import java.time.LocalDate
 
 private val VERDICTS = listOf("Au ralenti", "Fatigué", "Correct", "Bien récupéré", "En pleine forme")
@@ -45,18 +49,20 @@ internal fun HomeScreen(
     var selected by remember { mutableStateOf<LocalDate?>(null) }
     val strips = Metric.entries.filter { it in home.strips && it in visibleMetrics }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(aubeOr(12.dp, AubeDimens.CardGap))) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Aujourd'hui", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Aujourd'hui", color = c.ink, style = sleepText(TextRole.ScreenTitle, 20.sp, FontWeight.Bold))
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onPersonalize) { Text("Personnaliser", color = c.ink2, fontSize = 13.sp) }
+            TextButton(onClick = onPersonalize) {
+                Text("Personnaliser", color = c.ink2, style = sleepText(TextRole.Label, 13.sp))
+            }
         }
-        Text(today.format(LongDate), color = c.ink2, fontSize = 14.sp)
+        Text(today.format(LongDate), color = c.ink2, style = sleepText(TextRole.Body, 14.sp))
 
         if (demo) DemoBanner(onExitDemo)
 
         if (home.card) {
-            Panel {
+            Panel(CardKind.Main) {
                 RecoveryCard(recent, today, goals, home.gauge, home.breakdown, missingHrv, showNotes, onRequestPermissions)
             }
         }
@@ -78,7 +84,7 @@ internal fun HomeScreen(
             Text(
                 "Aucune bande à afficher : choisis-en dans les réglages de l'accueil.",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
         }
 
@@ -90,7 +96,7 @@ internal fun HomeScreen(
             Text(
                 "Touche une case pour voir son détail, « Année › » pour ouvrir sa grille.",
                 color = c.ink3,
-                fontSize = 11.sp,
+                style = sleepText(TextRole.Caption, 11.sp),
             )
         }
     }
@@ -111,15 +117,24 @@ private fun HomeStrip(
     val series = remember(metric, data) { data.series(metric) }
     val scale = remember(metric, goals, c) { scaleFor(metric, goals, c.levels) }
     Panel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(metric.label, color = c.ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(
+                    metric.label,
+                    color = c.ink,
+                    style = sleepText(TextRole.SectionTitle, classicWeight = FontWeight.SemiBold),
+                    modifier = Modifier.weight(1f),
+                )
                 if (series.isNotEmpty()) {
-                    Text("moy. ${metric.format(series.values.average())}", color = c.ink2, fontSize = 12.sp)
+                    Text(
+                        "moy. ${metric.format(series.values.average())}",
+                        color = c.ink2,
+                        style = sleepText(TextRole.Caption, 12.sp),
+                    )
                 }
                 Spacer(Modifier.width(10.dp))
                 TextButton(onClick = onOpenYear, contentPadding = PaddingValues(0.dp)) {
-                    Text("Année ›", color = c.ink2, fontSize = 12.sp)
+                    Text("Année ›", color = c.ink2, style = sleepText(TextRole.Label, 12.sp))
                 }
             }
             RecentHeatmap(
@@ -150,22 +165,22 @@ private fun RecoveryCard(
         .firstNotNullOfOrNull { day -> recent.recovery[day]?.let { day to it } }
     val scale = remember(goals, c) { scaleFor(Metric.RECOVERY, goals, c.levels) }
 
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Récupération", color = c.ink, fontWeight = FontWeight.SemiBold)
+    Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Récupération", color = c.ink, style = sleepText(TextRole.CardTitle, classicWeight = FontWeight.SemiBold))
 
         if (recent.recoveryConfig.components.isEmpty()) {
             Text(
                 "Aucune composante active : choisis-en au moins une dans les réglages du score " +
                     "de récupération.",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
         } else if (latest == null) {
             Text(
                 "Pas encore de score. Il faut la nuit dernière et au moins une autre composante " +
                     "active, comparée à ta propre moyenne, qui demande une semaine de relevés.",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
         } else {
             val (day, score) = latest
@@ -185,11 +200,11 @@ private fun RecoveryCard(
                                 style = Stroke(stroke, cap = StrokeCap.Round),
                             )
                         }
-                        Text("${score.total}", color = color, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                        Text("${score.total}", color = color, style = sleepText(TextRole.Score, 38.sp, FontWeight.Bold))
                     }
                     Spacer(Modifier.width(16.dp))
                 } else {
-                    Text("${score.total}", color = color, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+                    Text("${score.total}", color = color, style = sleepText(TextRole.Score, 38.sp, FontWeight.Bold))
                     Spacer(Modifier.width(16.dp))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -197,14 +212,13 @@ private fun RecoveryCard(
                         Text(
                             VERDICTS[scale.levelOf(score.total.toDouble())],
                             color = color,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = sleepText(TextRole.Verdict, 20.sp, FontWeight.SemiBold),
                         )
                     }
                     Text(
                         if (day == today) "Ce matin, sur 100" else "Hier matin : la nuit dernière n'est pas encore là",
                         color = c.ink2,
-                        fontSize = 13.sp,
+                        style = sleepText(TextRole.Caption, 13.sp),
                     )
                 }
             }
@@ -216,7 +230,7 @@ private fun RecoveryCard(
                 "Sans la variabilité cardiaque, le score repose sur les autres composantes actives : " +
                     "autorise-la dans Health Connect pour le compléter.",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
             OutlinedButton(onClick = onRequestPermissions) {
                 Text("Autoriser la VFC", color = c.ink)
@@ -226,7 +240,7 @@ private fun RecoveryCard(
                 "Aucune VFC trouvée dans Health Connect : ta montre n'en enregistre peut-être " +
                     "pas. Le score se calcule sans elle.",
                 color = c.ink3,
-                fontSize = 11.sp,
+                style = sleepText(TextRole.Caption, 11.sp),
             )
         }
         if (showNotes) {
@@ -234,7 +248,7 @@ private fun RecoveryCard(
                 "Chaque composante se compare à tes semaines précédentes ; une grosse journée de " +
                     "pas la veille fait baisser le score. Indicatif, pas médical.",
                 color = c.ink3,
-                fontSize = 11.sp,
+                style = sleepText(TextRole.Caption, 11.sp),
             )
         }
     }

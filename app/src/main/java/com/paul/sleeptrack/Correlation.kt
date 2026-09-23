@@ -11,8 +11,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.paul.sleeptrack.ui.theme.AubeDimens
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import com.paul.sleeptrack.ui.theme.SleepColors
+import com.paul.sleeptrack.ui.theme.TextRole
+import com.paul.sleeptrack.ui.theme.aubeOr
+import com.paul.sleeptrack.ui.theme.sleepText
 import java.time.Duration
 import java.time.LocalDate
 import java.util.Locale
@@ -96,15 +100,15 @@ fun CorrelationPanel(data: HealthData, showNotes: Boolean = true) {
     val pairs = pairDaysWithNights(data)
     val insight = correlationInsight(data)
 
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Activité et sommeil", color = c.ink, fontWeight = FontWeight.SemiBold)
+    Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Activité et sommeil", color = c.ink, style = sleepText(TextRole.CardTitle, classicWeight = FontWeight.SemiBold))
 
         if (insight == null || pairs.size < 10) {
             Text(
                 "Il faut au moins une dizaine de journées avec des pas et la nuit qui suit " +
                     "pour comparer les deux (${pairs.size} pour l'instant).",
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
             return@Column
         }
@@ -115,11 +119,10 @@ fun CorrelationPanel(data: HealthData, showNotes: Boolean = true) {
             Text(
                 "${insight.strength} · r = %.2f".format(Locale.FRENCH, insight.r),
                 color = if (abs(insight.r) < 0.10) c.ink2 else c.positive,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = sleepText(TextRole.Label, 13.sp, FontWeight.SemiBold),
             )
             Spacer(Modifier.weight(1f))
-            Text("${insight.count} paires", color = c.ink2, fontSize = 12.sp)
+            Text("${insight.count} paires", color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
         }
 
         val active = insight.afterActive
@@ -140,7 +143,7 @@ fun CorrelationPanel(data: HealthData, showNotes: Boolean = true) {
                     )
                 },
                 color = c.ink2,
-                fontSize = 13.sp,
+                style = sleepText(TextRole.Body, 13.sp),
             )
         }
 
@@ -149,7 +152,7 @@ fun CorrelationPanel(data: HealthData, showNotes: Boolean = true) {
                 "Un lien n'est pas une cause : une journée active et une bonne nuit peuvent " +
                     "simplement suivre la même semaine tranquille.",
                 color = c.ink3,
-                fontSize = 11.sp,
+                style = sleepText(TextRole.Caption, 11.sp),
             )
         }
     }
@@ -196,16 +199,16 @@ private fun Scatter(pairs: List<DayNight>, c: SleepColors) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Text("0 pas", color = c.ink2, fontSize = 10.sp)
+            Text("0 pas", color = c.ink2, style = sleepText(TextRole.Axis, 10.sp))
             Spacer(Modifier.weight(1f))
             Text(
                 "sommeil ${formatDuration(Duration.ofMinutes((minSleep * 60).toLong()))}" +
                     " → ${formatDuration(Duration.ofMinutes((maxSleep * 60).toLong()))}",
                 color = c.ink2,
-                fontSize = 10.sp,
+                style = sleepText(TextRole.Axis, 10.sp),
             )
             Spacer(Modifier.weight(1f))
-            Text("${formatSteps(maxSteps.toLong())} pas", color = c.ink2, fontSize = 10.sp)
+            Text("${formatSteps(maxSteps.toLong())} pas", color = c.ink2, style = sleepText(TextRole.Axis, 10.sp))
         }
     }
 }

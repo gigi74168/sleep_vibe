@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.TextRole
+import com.paul.sleeptrack.ui.theme.sleepText
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -71,7 +73,7 @@ fun YearHeatmap(
                 DAY_LABELS.forEach { label ->
                     Box(Modifier.height(pitch), contentAlignment = Alignment.CenterStart) {
                         if (label.isNotEmpty()) {
-                            Text(label, color = c.ink2, fontSize = labelSize, maxLines = 1, softWrap = false)
+                            Text(label, color = c.ink2, style = sleepText(TextRole.Axis, labelSize), maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -88,7 +90,7 @@ fun YearHeatmap(
                                 .take(3)
                                 .replaceFirstChar { it.uppercase() },
                             color = c.ink2,
-                            fontSize = labelSize,
+                            style = sleepText(TextRole.Axis, labelSize),
                             maxLines = 1,
                             softWrap = false,
                             modifier = Modifier.offset(x = pitch * col),
@@ -208,12 +210,12 @@ fun RecentHeatmap(
 fun Legend(metric: Metric, scale: Scale) {
     val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(metric.label, color = c.ink2, fontSize = 12.sp)
+        Text(metric.label, color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
         Spacer(Modifier.weight(1f))
         scale.colors.zip(scale.labels).forEach { (color, label) ->
             Box(Modifier.size(10.dp).background(color, RoundedCornerShape(3.dp)))
             Spacer(Modifier.width(3.dp))
-            Text(label, color = c.ink2, fontSize = 10.sp, maxLines = 1, softWrap = false)
+            Text(label, color = c.ink2, style = sleepText(TextRole.Axis, 10.sp), maxLines = 1, softWrap = false)
             Spacer(Modifier.width(6.dp))
         }
     }
