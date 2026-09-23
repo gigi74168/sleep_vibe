@@ -86,13 +86,13 @@ private const val RECENT_DAYS = 200L
 @Composable
 private fun SleepRoot() {
     val context = LocalContext.current
-    val appearance by remember { mutableStateOf(Prefs.appearance(context)) }
+    var appearance by remember { mutableStateOf(Prefs.appearance(context)) }
     val colors = AubeTokens.resolve(appearance.theme, appearance.mode, isSystemInDarkTheme())
-    SleepTheme(colors) { SleepApp() }
+    SleepTheme(colors) { SleepApp(onAppearanceChange = { appearance = Prefs.appearance(context) }) }
 }
 
 @Composable
-private fun SleepApp() {
+private fun SleepApp(onAppearanceChange: () -> Unit) {
     val c = LocalSleepColors.current
     val context = LocalContext.current
     var year by remember { mutableIntStateOf(LocalDate.now().year) }
@@ -300,7 +300,7 @@ private fun SleepApp() {
                         onRequestPermissions = { permissionLauncher.launch(requested) },
                         onExitDemo = { demo = false },
                     )
-                    Tab.SETTINGS -> SettingsScreen(data = s.data)
+                    Tab.SETTINGS -> SettingsScreen(data = s.data, onAppearanceChange = onAppearanceChange)
                 }
             }
         }

@@ -76,6 +76,29 @@ object Prefs {
         Appearance(ThemeChoice.of(it.getString(THEME, null)), ThemeMode.of(it.getString(THEME_MODE, null)))
     }
 
+    fun setTheme(context: Context, theme: ThemeChoice) {
+        of(context).edit().putString(THEME, theme.key).apply()
+    }
+
+    fun setThemeMode(context: Context, mode: ThemeMode) {
+        of(context).edit().putString(THEME_MODE, mode.key).apply()
+    }
+
+    /** L'apparence telle qu'elle part dans l'export JSON. */
+    fun appearanceJson(context: Context): JSONObject = appearance(context).let {
+        JSONObject().put("theme", it.theme.key).put("mode", it.mode.key)
+    }
+
+    /** Reprend l'apparence d'un export ; une valeur inconnue ou absente ne change rien. */
+    fun importAppearance(context: Context, settings: JSONObject) {
+        val editor = of(context).edit()
+        settings.optString("theme").takeIf { v -> ThemeChoice.entries.any { it.key == v } }
+            ?.let { editor.putString(THEME, it) }
+        settings.optString("mode").takeIf { v -> ThemeMode.entries.any { it.key == v } }
+            ?.let { editor.putString(THEME_MODE, it) }
+        editor.apply()
+    }
+
     fun eveningEnabled(context: Context) = of(context).getBoolean(EVENING_ENABLED, false)
     fun eveningHour(context: Context) = of(context).getInt(EVENING_HOUR, DEFAULT_EVENING_HOUR)
     fun weeklyEnabled(context: Context) = of(context).getBoolean(WEEKLY_ENABLED, false)

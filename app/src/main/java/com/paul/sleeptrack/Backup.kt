@@ -19,6 +19,9 @@ import java.time.LocalDate
  *               "screenMinutes": 214, "hrvRmssd": 48.1 } ] }
  * ```
  *
+ * Un export porte aussi l'apparence (`"settings": { "theme": "aube", "mode": "system" }`) ;
+ * ce bloc est facultatif à l'import, et une valeur inconnue y est ignorée.
+ *
  * La lecture est volontairement tolérante : `days` peut aussi être un objet indexé par date,
  * les heures de sommeil sont acceptées à la place des minutes, et les noms de champs les plus
  * courants ailleurs (`step_count`, `rmssd`…) sont reconnus. Le poids et le cœur au repos des
@@ -90,7 +93,8 @@ object Archive {
 
 /** Écrit la sauvegarde dans le fichier choisi par l'utilisateur. Renvoie le nombre de jours. */
 fun exportBackup(context: Context, uri: Uri, data: HealthData): Int {
-    val json = encodeBackup(data).toString(2)
+    // L'archive locale passe aussi par encodeBackup : l'apparence ne s'ajoute qu'à l'export.
+    val json = encodeBackup(data).put("settings", Prefs.appearanceJson(context)).toString(2)
     context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
         out.write(json.toByteArray(Charsets.UTF_8))
     } ?: error("fichier inaccessible en écriture")
@@ -119,12 +123,17 @@ fun exportCsv(context: Context, uri: Uri, data: HealthData): Int {
     return days.size
 }
 
-/** Relit un fichier de sauvegarde. Lève une exception si le JSON est illisible. */
+/**
+ * Relit un fichier de sauvegarde et reprend l'apparence qu'il porte, s'il en porte une.
+ * Lève une exception si le JSON est illisible.
+ */
 fun importBackup(context: Context, uri: Uri): HealthData {
     val text = context.contentResolver.openInputStream(uri)
         ?.use { it.readBytes().toString(Charsets.UTF_8) }
         ?: error("fichier illisible")
-    return decodeBackup(JSONObject(text))
+    val root = JSONObject(text)
+    root.optJSONObject("settings")?.let { Prefs.importAppearance(context, it) }
+    return decodeBackup(root)
 }
 
 fun dayCount(data: HealthData): Int = allDays(data).size

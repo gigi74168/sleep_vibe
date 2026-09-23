@@ -12,12 +12,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.ThemeChoice
+import com.paul.sleeptrack.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,8 +30,9 @@ import java.time.LocalDate
 /** Marqueur : la demande d'autorisation en cours vient du bouton d'exemple. */
 private const val SAMPLE = "sample"
 
+/** [onAppearanceChange] : le thème a changé (réglage, import ou remise à zéro), l'app le relit. */
 @Composable
-internal fun SettingsScreen(data: HealthData) {
+internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {}) {
     val c = LocalSleepColors.current
     val context = LocalContext.current
     var evening by remember { mutableStateOf(Prefs.eveningEnabled(context)) }
@@ -42,6 +46,7 @@ internal fun SettingsScreen(data: HealthData) {
     var home by remember { mutableStateOf(Prefs.home(context)) }
     var recovery by remember { mutableStateOf(Prefs.recoveryConfig(context)) }
     var goals by remember { mutableStateOf(Prefs.goals(context)) }
+    var appearance by remember { mutableStateOf(Prefs.appearance(context)) }
     var backupStatus by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -58,6 +63,8 @@ internal fun SettingsScreen(data: HealthData) {
         home = Prefs.home(context)
         recovery = Prefs.recoveryConfig(context)
         goals = Prefs.goals(context)
+        appearance = Prefs.appearance(context)
+        onAppearanceChange()
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -110,6 +117,9 @@ internal fun SettingsScreen(data: HealthData) {
                 }
             }.fold(
                 { days ->
+                    // Le fichier a pu apporter un autre thème.
+                    appearance = Prefs.appearance(context)
+                    onAppearanceChange()
                     if (days == 0) {
                         "Aucun jour reconnu dans ce fichier."
                     } else {
@@ -168,6 +178,35 @@ internal fun SettingsScreen(data: HealthData) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Réglages", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
+        Section("Apparence") {
+            Text("Thème", color = c.ink, fontWeight = FontWeight.SemiBold)
+            ChoiceRow(
+                options = ThemeChoice.entries.map { it.key to it.label },
+                current = appearance.theme.key,
+            ) { key ->
+                Prefs.setTheme(context, ThemeChoice.of(key))
+                appearance = Prefs.appearance(context)
+                onAppearanceChange()
+            }
+            val modeEnabled = appearance.theme == ThemeChoice.AUBE
+            Text("Mode", color = if (modeEnabled) c.ink else c.ink2, fontWeight = FontWeight.SemiBold)
+            ChoiceRow(
+                options = ThemeMode.entries.map { it.key to it.label },
+                current = appearance.mode.key,
+                enabled = modeEnabled,
+            ) { key ->
+                Prefs.setThemeMode(context, ThemeMode.of(key))
+                appearance = Prefs.appearance(context)
+                onAppearanceChange()
+            }
+            Text(
+                "Le mode ne concerne qu'Aube : Clair affiche Aube, Sombre affiche Nuit tombée, " +
+                    "Système suit le thème sombre d'Android.",
+                color = c.ink3,
+                fontSize = 11.sp,
+            )
+        }
+
         Section("Accueil", startExpanded = true) {
             SettingSwitch(
                 title = "Carte de récupération",
@@ -204,7 +243,10 @@ internal fun SettingsScreen(data: HealthData) {
                 checked = home.tapDetail,
             ) { on -> Prefs.setHomeFlag(context, Prefs.HOME_TAP_DETAIL, on); home = Prefs.home(context) }
             Text("Onglet d'ouverture", color = c.ink, fontWeight = FontWeight.SemiBold)
-            TabChoice(home.startTab) { next -> Prefs.setStartTab(context, next); home = Prefs.home(context) }
+            ChoiceRow(
+                options = listOf("HOME" to "Accueil", "GRIDS" to "Grilles"),
+                current = home.startTab,
+            ) { next -> Prefs.setStartTab(context, next); home = Prefs.home(context) }
         }
 
         Section("Score de récupération") {
@@ -488,17 +530,24 @@ private fun Section(title: String, startExpanded: Boolean = false, content: @Com
     }
 }
 
+/** Un choix exclusif entre quelques options : [options] associe une clé à son libellé. */
 @Composable
-private fun TabChoice(current: String, onChange: (String) -> Unit) {
+private fun ChoiceRow(
+    options: List<Pair<String, String>>,
+    current: String,
+    enabled: Boolean = true,
+    onChange: (String) -> Unit,
+) {
     val c = LocalSleepColors.current
     Row(
         Modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.38f)
             .background(c.surface2, RoundedCornerShape(14.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        listOf("HOME" to "Accueil", "GRIDS" to "Grilles").forEach { (value, label) ->
+        options.forEach { (value, label) ->
             val active = value == current
             Box(
                 Modifier
@@ -507,7 +556,7 @@ private fun TabChoice(current: String, onChange: (String) -> Unit) {
                         if (active) c.accent else Color.Transparent,
                         RoundedCornerShape(11.dp),
                     )
-                    .clickable { onChange(value) }
+                    .clickable(enabled = enabled) { onChange(value) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
