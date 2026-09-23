@@ -60,19 +60,22 @@ jobs:
           set -euo pipefail
           apk=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           test -n "$apk"
-          mv "$apk" "sommeil-${{ steps.v.outputs.tag }}.apk"
-          ls -la sommeil-*.apk
+          mv "$apk" "sleeptrack-${{ steps.v.outputs.tag }}.apk"
+          ls -la sleeptrack-*.apk
 
       # Crée le tag s'il n'existe pas encore, au commit courant.
       - name: Publier la release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.v.outputs.tag }}
-          name: Sommeil ${{ steps.v.outputs.tag }}
-          files: sommeil-*.apk
+          name: Sleep Track ${{ steps.v.outputs.tag }}
+          files: sleeptrack-*.apk
+          # Un tag à suffixe (v3.1.0-beta) part en pré-release : la dernière version stable
+          # reste celle que GitHub met en avant.
+          prerelease: ${{ contains(steps.v.outputs.tag, '-') }}
           generate_release_notes: true
           body: |
-            Installe l'APK ci-dessous : `adb install -r sommeil-${{ steps.v.outputs.tag }}.apk`,
+            Installe l'APK ci-dessous : `adb install -r sleeptrack-${{ steps.v.outputs.tag }}.apk`,
             ou ouvre-le depuis le téléphone.
 
             Signé avec la clé de debug : bon pour une installation personnelle, pas pour le

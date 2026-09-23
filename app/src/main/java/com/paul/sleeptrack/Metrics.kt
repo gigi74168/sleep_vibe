@@ -5,7 +5,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.util.Locale
 
-/** Les séries quotidiennes : quatre lues dans Health Connect, le temps d'écran lu dans Android. */
+/** Les séries quotidiennes : cinq lues dans Health Connect, le temps d'écran lu dans Android. */
 data class HealthData(
     val nights: Map<LocalDate, Duration> = emptyMap(),
     val steps: Map<LocalDate, Long> = emptyMap(),
@@ -13,15 +13,29 @@ data class HealthData(
     val weight: Map<LocalDate, Double> = emptyMap(),
     /** Minutes d'écran allumé et déverrouillé. */
     val screen: Map<LocalDate, Double> = emptyMap(),
+    /** VFC nocturne (RMSSD, en ms), rattachée comme le sommeil à la date du réveil. */
+    val hrv: Map<LocalDate, Double> = emptyMap(),
+    /**
+     * Scores déjà calculés sur un historique plus large : une année filtrée garde ainsi, pour
+     * ses premiers jours, la ligne de base prise en décembre. Null : calculés sur ces données.
+     */
+    private val precomputedRecovery: Map<LocalDate, RecoveryScore>? = null,
 ) {
     // Les séries servent partout (grille, tuiles, séries, semaine type, détail du jour,
     // widget) : converties une fois par jeu de données plutôt qu'à chaque appel.
     private val sleepSeries by lazy { nights.mapValues { it.value.toMinutes().toDouble() } }
     private val stepSeries by lazy { steps.mapValues { it.value.toDouble() } }
+    private val recoverySeries by lazy { recovery.mapValues { it.value.total.toDouble() } }
 
-    /** Série normalisée : minutes, pas, bpm, kg ou minutes d'écran selon la métrique. */
+    /** Score de récupération de chaque matin, jamais stocké : toujours recalculé. */
+    val recovery: Map<LocalDate, RecoveryScore> by lazy {
+        precomputedRecovery ?: recoveryScores(nights, steps, heart, hrv)
+    }
+
+    /** Série normalisée : minutes, score, pas, bpm, kg ou minutes d'écran selon la métrique. */
     fun series(metric: Metric): Map<LocalDate, Double> = when (metric) {
         Metric.SLEEP -> sleepSeries
+        Metric.RECOVERY -> recoverySeries
         Metric.STEPS -> stepSeries
         Metric.HEART -> heart
         Metric.WEIGHT -> weight
@@ -29,14 +43,23 @@ data class HealthData(
     }
 
     fun isEmpty(): Boolean =
-        nights.isEmpty() && steps.isEmpty() && heart.isEmpty() && weight.isEmpty() && screen.isEmpty()
+        nights.isEmpty() && steps.isEmpty() && heart.isEmpty() && weight.isEmpty() && screen.isEmpty() &&
+            hrv.isEmpty()
 
-    fun filterYear(year: Int) = HealthData(
-        nights.filterKeys { it.year == year },
-        steps.filterKeys { it.year == year },
-        heart.filterKeys { it.year == year },
-        weight.filterKeys { it.year == year },
-        screen.filterKeys { it.year == year },
+    fun filterYear(year: Int) = filterDays { it.year == year }
+
+    /** Les jours à partir de [from], pour l'accueil. */
+    fun since(from: LocalDate) = filterDays { it >= from }
+
+    // Les scores sont calculés avant de couper : ceux qui restent gardent leur ligne de base.
+    private fun filterDays(keep: (LocalDate) -> Boolean) = HealthData(
+        nights.filterKeys(keep),
+        steps.filterKeys(keep),
+        heart.filterKeys(keep),
+        weight.filterKeys(keep),
+        screen.filterKeys(keep),
+        hrv.filterKeys(keep),
+        recovery.filterKeys(keep),
     )
 
     operator fun plus(other: HealthData) = HealthData(
@@ -45,11 +68,14 @@ data class HealthData(
         heart + other.heart,
         weight + other.weight,
         screen + other.screen,
+        hrv + other.hrv,
     )
 }
 
 enum class Metric(val label: String, val detailLabel: String, val canHide: Boolean = true) {
     SLEEP("Sommeil", "Sommeil", canHide = false),
+    // Calculée à partir des autres, c'est le cœur de l'accueil : elle ne se masque pas.
+    RECOVERY("Récup", "Récupération", canHide = false),
     STEPS("Pas", "Pas"),
     HEART("Cœur", "Cœur au repos"),
     WEIGHT("Poids", "Poids"),
@@ -58,6 +84,7 @@ enum class Metric(val label: String, val detailLabel: String, val canHide: Boole
 
 fun Metric.format(value: Double): String = when (this) {
     Metric.SLEEP -> formatDuration(Duration.ofMinutes(value.toLong()))
+    Metric.RECOVERY -> "%.0f".format(value)
     Metric.STEPS -> formatSteps(value.toLong())
     Metric.HEART -> "%.0f bpm".format(value)
     Metric.WEIGHT -> "%.1f kg".format(Locale.FRENCH, value)
@@ -94,12 +121,16 @@ fun scaleFor(metric: Metric, data: HealthData): Scale = when (metric) {
         listOf(300.0, 360.0, 420.0, 480.0), false, Palette.levels,
         listOf("<5h", "5-6h", "6-7h", "7-8h", "8h+"),
     )
+    Metric.RECOVERY -> Scale(
+        RECOVERY_BOUNDS, false, Palette.levels,
+        listOf("<34", "34-50", "50-67", "67-80", "80+"),
+    )
     Metric.STEPS -> Scale(
         listOf(3_000.0, 6_000.0, 8_000.0, 10_000.0), false, Palette.levels,
         listOf("<3k", "3-6k", "6-8k", "8-10k", "10k+"),
     )
     Metric.HEART -> Scale(
-        listOf(52.0, 58.0, 64.0, 70.0), true, Palette.levels,
+        HEART_BOUNDS, true, Palette.levels,
         listOf("70+", "64-70", "58-64", "52-58", "<52"),
     )
     Metric.WEIGHT -> weightScale(data.weight.values)
@@ -153,6 +184,18 @@ fun statTiles(metric: Metric, data: HealthData, scale: Scale): List<StatTile> {
                 StatTile(
                     "Nuits < 6h", "$short",
                     if (short > 0) Palette.levels[0] else Palette.levels.last(),
+                ),
+            )
+        }
+        Metric.RECOVERY -> {
+            val green = series.values.count { it >= RECOVERY_GOOD }
+            listOf(
+                tile("Moyenne", average),
+                recentTile,
+                tile("Meilleur", series.values.max()),
+                StatTile(
+                    "Jours ≥ $RECOVERY_GOOD", "$green",
+                    if (green > 0) Palette.levels.last() else Palette.levels[0],
                 ),
             )
         }

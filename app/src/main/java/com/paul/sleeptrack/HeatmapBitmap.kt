@@ -38,13 +38,15 @@ fun renderStrip(
     widthPx: Int,
     heightPx: Int,
     today: LocalDate = LocalDate.now(),
+    /** Le fond du widget ; l'accueil, qui pose la bande sur ses cartes, en prend la couleur. */
+    background: Int = Palette.bg.toArgb(),
 ): Bitmap {
     val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(100), heightPx.coerceAtLeast(60), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
     val w = bmp.width.toFloat()
     val h = bmp.height.toFloat()
     val radius = h * 0.12f
-    canvas.drawRoundRect(RectF(0f, 0f, w, h), radius, radius, paint(Palette.bg.toArgb()))
+    canvas.drawRoundRect(RectF(0f, 0f, w, h), radius, radius, paint(background))
 
     val pad = h * 0.09f
     // Sous ~55dp de haut, l'en-tête mangerait la moitié de la tuile : la grille seule.
@@ -206,6 +208,6 @@ fun renderYearCard(
     }
 
     y += tileHeight * 2 + pad * 0.3f + smallSize * 1.6f
-    canvas.drawText("Sommeil · Health Connect", pad, y, paint(Palette.muted.toArgb(), smallSize))
+    canvas.drawText("Sleep Track · Health Connect", pad, y, paint(Palette.muted.toArgb(), smallSize))
     return bmp
 }

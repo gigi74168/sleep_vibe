@@ -31,10 +31,11 @@ jobs:
 
       # Pas de --stacktrace : sur une erreur de compilation il noie les lignes « e: »
       # sous deux cents lignes de pile Gradle, qui n'apprennent rien.
+      # Les tests JVM (score de récupération) passent avant la compilation de l'APK.
       - name: assembleDebug
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --console=plain 2>&1 | tee /tmp/build.log
+          ./gradlew testDebugUnitTest assembleDebug --console=plain 2>&1 | tee /tmp/build.log
 
       # Republie les erreurs à la toute fin du log, où elles se lisent sans dérouler.
       - name: Erreurs de compilation

@@ -12,8 +12,8 @@ android {
         applicationId = "com.paul.sleeptrack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "3.0.0"
+        versionCode = 12
+        versionName = "3.1.0-beta"
     }
 
     buildTypes {
@@ -48,4 +48,7 @@ dependencies {
     // déjà tirés en transitif, déclarés ici parce qu'on les utilise directement.
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Le calcul du score de récupération, testé sur la JVM sans appareil.
+    testImplementation("junit:junit:4.13.2")
 }

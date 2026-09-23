@@ -30,7 +30,7 @@ suspend fun shareYearImage(context: Context, year: Int, metric: Metric, data: He
     val uri = withContext(Dispatchers.Default) {
         val bitmap = renderYearCard(year, metric, data, quality.widthPx)
         val file = try {
-            writePng(context, bitmap, "sommeil-${metric.name.lowercase()}-$year.png")
+            writePng(context, bitmap, "sleeptrack-${metric.name.lowercase()}-$year.png")
         } finally {
             // Près de 40 Mo en 4K : rendus tout de suite plutôt qu'au prochain ramassage.
             bitmap.recycle()

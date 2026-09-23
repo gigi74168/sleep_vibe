@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Sommeil</string>
-    <string name="widget_label">Sommeil</string>
+    <string name="app_name">Sleep Track</string>
+    <string name="widget_label">Sleep Track</string>
     <string name="widget_description">Les dernières semaines, en grille</string>
 </resources>

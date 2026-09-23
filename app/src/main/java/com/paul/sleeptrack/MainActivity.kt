@@ -11,10 +11,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -71,9 +72,19 @@ private sealed interface UiState {
     data object Loading : UiState
     data object NotInstalled : UiState
     data object NeedsPermission : UiState
-    data class Ready(val data: HealthData, val missing: Set<String>) : UiState
+    /** [data] : l'année de la grille ; [recent] : les derniers mois, pour l'accueil. */
+    data class Ready(val data: HealthData, val recent: HealthData, val missing: Set<String>) : UiState
     data class Error(val message: String) : UiState
 }
+
+private enum class Tab(val label: String, val icon: Int) {
+    HOME("Accueil", R.drawable.ic_tab_home),
+    GRIDS("Grilles", R.drawable.ic_tab_grid),
+    SETTINGS("Réglages", R.drawable.ic_tab_settings),
+}
+
+/** Ce que l'accueil garde : de quoi remplir ses bandeaux, qui couvrent quelques mois. */
+private const val RECENT_DAYS = 200L
 
 @Composable
 private fun SleepApp() {
@@ -82,7 +93,7 @@ private fun SleepApp() {
     var metric by remember { mutableStateOf(Prefs.lastMetric(context)) }
     var visibleMetrics by remember { mutableStateOf(Prefs.visibleMetrics(context)) }
     var demo by remember { mutableStateOf(false) }
-    var settings by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(Tab.HOME) }
     var refreshKey by remember { mutableIntStateOf(0) }
     var display by remember { mutableStateOf(Prefs.display(context)) }
     var state by remember { mutableStateOf<UiState>(UiState.Loading) }
@@ -108,8 +119,17 @@ private fun SleepApp() {
     }
 
     LaunchedEffect(year, demo, refreshKey) {
+        val today = LocalDate.now()
+        // L'année est découpée dans tout l'historique, pas lue seule : les scores de
+        // récupération de janvier gardent ainsi leur ligne de base de décembre.
+        fun ready(all: HealthData, missing: Set<String>) =
+            UiState.Ready(all.filterYear(year), all.since(today.minusDays(RECENT_DAYS)), missing)
+
         if (demo) {
-            state = UiState.Ready(demoHealthData(year), emptySet())
+            val all = setOf(year - 1, year, today.year - 1, today.year)
+                .map(::demoHealthData)
+                .reduce(HealthData::plus)
+            state = ready(all, emptySet())
             return@LaunchedEffect
         }
         // Ce que l'app a déjà lu ou importé : de quoi afficher une année même si Health
@@ -117,10 +137,10 @@ private fun SleepApp() {
         // Android n'en garde qu'une dizaine de jours, l'archive fait le reste.
         val archived = withContext(Dispatchers.IO) {
             if (Metric.SCREEN in visibleMetrics) syncScreenTime(context)
-            Archive.load(context).filterYear(year)
+            Archive.load(context)
         }
         if (HealthConnectClient.getSdkStatus(context) != HealthConnectClient.SDK_AVAILABLE) {
-            state = if (archived.isEmpty()) UiState.NotInstalled else UiState.Ready(archived, emptySet())
+            state = if (archived.isEmpty()) UiState.NotInstalled else ready(archived, emptySet())
             return@LaunchedEffect
         }
         val client = HealthConnectClient.getOrCreate(context)
@@ -130,54 +150,65 @@ private fun SleepApp() {
                 if (archived.isEmpty()) {
                     UiState.NeedsPermission
                 } else {
-                    UiState.Ready(archived, REQUESTED_PERMISSIONS - granted)
+                    ready(archived, REQUESTED_PERMISSIONS - granted)
                 }
             } else {
-                // Health Connect a le dernier mot sur les jours qu'il connaît ; l'archive
-                // comble le reste.
-                val data = archived + loadYear(client, granted, year)
-                withContext(Dispatchers.IO) {
-                    Archive.merge(context, data)
+                // Quelques semaines avant le 1er janvier : la ligne de base de la récupération.
+                val fresh = loadHealthData(
+                    client, granted,
+                    LocalDate.of(year, 1, 1).minusDays(RECOVERY_BASELINE_DAYS + 7L),
+                    LocalDate.of(year, 12, 31),
+                )
+                val all = withContext(Dispatchers.IO) {
+                    // Health Connect a le dernier mot sur les jours qu'il connaît ; l'archive
+                    // comble le reste.
+                    val all = Archive.merge(context, fresh)
                     // Le widget et les rappels lisent ce cache : on le rafraîchit à chaque
                     // passage sur l'année en cours. Le widget n'est redessiné que si son
                     // image peut avoir changé : nouveau contenu, ou nouveau jour.
-                    if (year == LocalDate.now().year) {
-                        val changed = DataCache.save(context, data)
+                    if (year == today.year) {
+                        val changed = DataCache.save(context, all)
                         if (changed || !widgetsDrawnToday()) updateAllWidgets(context)
                     }
+                    all
                 }
-                UiState.Ready(data, REQUESTED_PERMISSIONS - granted)
+                ready(all, REQUESTED_PERMISSIONS - granted)
             }
         } catch (e: Exception) {
             UiState.Error(e.message ?: e.javaClass.simpleName)
         }
     }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Palette.bg)
-            .systemBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        when {
-            settings -> SettingsScreen(
-                data = (state as? UiState.Ready)?.data ?: DataCache.load(context),
-                onBack = {
-                    settings = false
-                    visibleMetrics = Prefs.visibleMetrics(context)
-                    display = Prefs.display(context)
-                    if (metric !in visibleMetrics) metric = Metric.SLEEP
-                    // Dessiné hors du fil de l'interface : le retour à l'écran principal
-                    // n'attend plus le rendu des images du widget.
-                    val app = context.applicationContext
-                    scope.launch(Dispatchers.IO) { updateAllWidgets(app) }
-                    // Un import a pu enrichir l'archive : on relit.
-                    refreshKey++
-                },
-            )
-            else -> when (val s = state) {
+    fun selectTab(next: Tab) {
+        if (tab == Tab.SETTINGS && next != Tab.SETTINGS) {
+            visibleMetrics = Prefs.visibleMetrics(context)
+            display = Prefs.display(context)
+            if (metric !in visibleMetrics) metric = Metric.SLEEP
+            // Dessiné hors du fil de l'interface : le changement d'onglet n'attend pas le
+            // rendu des images du widget.
+            val app = context.applicationContext
+            scope.launch(Dispatchers.IO) { updateAllWidgets(app) }
+            // Un import a pu enrichir l'archive : on relit.
+            refreshKey++
+        }
+        tab = next
+    }
+
+    val ready = state as? UiState.Ready
+    Scaffold(
+        containerColor = Palette.bg,
+        bottomBar = { if (ready != null) BottomBar(tab, ::selectTab) },
+    ) { insets ->
+        // Chaque onglet garde sa propre position de défilement.
+        val scroll = remember(tab) { ScrollState(0) }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(insets)
+                .verticalScroll(scroll)
+                .padding(16.dp)
+        ) {
+            when (val s = state) {
                 UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
                     CircularProgressIndicator(color = Palette.levels.last())
                 }
@@ -195,8 +226,9 @@ private fun SleepApp() {
                 )
                 UiState.NeedsPermission -> Message(
                     title = "Accès à tes données de santé",
-                    body = "Sommeil lit tes nuits, tes pas, ton cœur au repos et ton poids dans Health " +
-                        "Connect pour dessiner tes grilles. Rien ne quitte ton téléphone.",
+                    body = "Sleep Track lit tes nuits, tes pas, ton cœur au repos, ta variabilité cardiaque " +
+                        "et ton poids dans Health Connect pour dessiner tes grilles et calculer ta " +
+                        "récupération. Rien ne quitte ton téléphone.",
                     action = "Autoriser l'accès",
                     onAction = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
                     onDemo = { demo = true },
@@ -208,25 +240,70 @@ private fun SleepApp() {
                     onAction = { refreshKey++ },
                     onDemo = { demo = true },
                 )
-                is UiState.Ready -> MainScreen(
-                    year = year,
-                    metric = metric,
-                    visibleMetrics = visibleMetrics,
-                    display = display,
-                    data = s.data,
-                    missing = s.missing,
-                    demo = demo,
-                    onYear = { year = it },
-                    onMetric = {
-                        metric = it
-                        Prefs.setLastMetric(context, it)
-                    },
-                    onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
-                    onExitDemo = { demo = false },
-                    onSettings = { settings = true },
-                )
+                is UiState.Ready -> when (tab) {
+                    Tab.HOME -> HomeScreen(
+                        recent = s.recent,
+                        visibleMetrics = visibleMetrics,
+                        missingHrv = PERMISSION_READ_HRV in s.missing && !demo,
+                        showNotes = display.notes,
+                        demo = demo,
+                        onOpenMetric = {
+                            metric = it
+                            Prefs.setLastMetric(context, it)
+                            selectTab(Tab.GRIDS)
+                        },
+                        onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
+                        onExitDemo = { demo = false },
+                    )
+                    Tab.GRIDS -> MainScreen(
+                        year = year,
+                        metric = metric,
+                        visibleMetrics = visibleMetrics,
+                        display = display,
+                        data = s.data,
+                        missing = s.missing,
+                        demo = demo,
+                        onYear = { year = it },
+                        onMetric = {
+                            metric = it
+                            Prefs.setLastMetric(context, it)
+                        },
+                        onRequestPermissions = { permissionLauncher.launch(requestedPermissions(visibleMetrics)) },
+                        onExitDemo = { demo = false },
+                    )
+                    Tab.SETTINGS -> SettingsScreen(data = s.data)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
+    NavigationBar(containerColor = Palette.card) {
+        Tab.entries.forEach { entry ->
+            NavigationBarItem(
+                selected = entry == current,
+                onClick = { onSelect(entry) },
+                icon = { Icon(painterResource(entry.icon), contentDescription = null) },
+                label = { Text(entry.label) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Palette.bg,
+                    selectedTextColor = Palette.text,
+                    indicatorColor = Palette.levels.last(),
+                    unselectedIconColor = Palette.muted,
+                    unselectedTextColor = Palette.muted,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun DemoBanner(onExitDemo: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Mode démo (données fictives)", color = Palette.levels[2], fontSize = 13.sp, modifier = Modifier.weight(1f))
+        TextButton(onClick = onExitDemo) { Text("Quitter", color = Palette.text) }
     }
 }
 
@@ -243,7 +320,6 @@ private fun MainScreen(
     onMetric: (Metric) -> Unit,
     onRequestPermissions: () -> Unit,
     onExitDemo: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -267,7 +343,7 @@ private fun MainScreen(
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Sommeil", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Grilles", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Box {
                 var shareMenu by remember { mutableStateOf(false) }
@@ -301,17 +377,9 @@ private fun MainScreen(
                     }
                 }
             }
-            TextButton(onClick = onSettings) {
-                Text("Réglages", color = Palette.muted, fontSize = 14.sp)
-            }
         }
 
-        if (demo) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Mode démo (données fictives)", color = Palette.levels[2], fontSize = 13.sp, modifier = Modifier.weight(1f))
-                TextButton(onClick = onExitDemo) { Text("Quitter", color = Palette.text) }
-            }
-        }
+        if (demo) DemoBanner(onExitDemo)
 
         if (visibleMetrics.size > 1) MetricSwitch(metric, visibleMetrics, onMetric)
 
@@ -335,14 +403,14 @@ private fun MainScreen(
             }
         }
 
-        selected?.let { day -> DayDetail(day, data, visibleMetrics) }
+        selected?.let { day -> DayDetail(day, metric, data, visibleMetrics) }
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Le temps d'écran ne vient pas de Health Connect mais d'Android. Autorise " +
-                            "Sommeil dans « Accès aux données d'utilisation », puis reviens ici.",
+                            "Sleep Track dans « Accès aux données d'utilisation », puis reviens ici.",
                         color = Palette.muted,
                         fontSize = 13.sp,
                     )
@@ -413,7 +481,10 @@ private fun MainScreen(
 }
 
 private fun missingText(missing: Set<String>): String {
-    val parts = DATA_PERMISSIONS.filterValues { it in missing }.keys.map { it.detailLabel.lowercase() }
+    val parts = DATA_PERMISSIONS.filterValues { it in missing }.keys.map {
+        // La récupération se calcule ; ce qui manque, c'est la VFC qu'elle utilise.
+        if (it == Metric.RECOVERY) "la variabilité cardiaque" else it.detailLabel.lowercase()
+    }
     val extras = buildList {
         if (PERMISSION_READ_HISTORY in missing) add("l'historique au-delà de 30 jours")
         if (PERMISSION_READ_BACKGROUND in missing) add("la lecture en arrière-plan (widget et rappels)")
@@ -455,7 +526,11 @@ private fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metri
                     entry.label,
                     color = if (active) Palette.text else Palette.muted,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = if (entries.size > 4) 12.sp else 14.sp,
+                    fontSize = when {
+                        entries.size > 5 -> 11.sp
+                        entries.size > 4 -> 12.sp
+                        else -> 14.sp
+                    },
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -477,7 +552,7 @@ private fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Panel(content: @Composable () -> Unit) {
+internal fun Panel(content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -486,7 +561,7 @@ private fun Panel(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Metric>) {
+private fun DayDetail(day: LocalDate, metric: Metric, data: HealthData, visibleMetrics: List<Metric>) {
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -502,12 +577,18 @@ private fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Met
                     value?.let { scaleFor(entry, data).colorOf(it) },
                 )
             }
+            if (metric == Metric.RECOVERY) {
+                data.recovery[day]?.let { score ->
+                    Text("Détail de la récupération", color = Palette.muted, fontSize = 12.sp)
+                    RecoveryBreakdown(day, score, data)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun DetailLine(label: String, value: String, color: Color?) {
+internal fun DetailLine(label: String, value: String, color: Color?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(14.dp).background(color ?: Palette.empty, RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(10.dp))
@@ -562,7 +643,7 @@ private fun Message(title: String, body: String, action: String, onAction: () ->
 private const val SAMPLE = "sample"
 
 @Composable
-private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
+private fun SettingsScreen(data: HealthData) {
     val context = LocalContext.current
     var evening by remember { mutableStateOf(Prefs.eveningEnabled(context)) }
     var eveningHour by remember { mutableIntStateOf(Prefs.eveningHour(context)) }
@@ -684,11 +765,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Réglages", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onBack) { Text("Retour", color = Palette.muted) }
-        }
+        Text("Réglages", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         Panel {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -775,7 +852,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Widget", color = Palette.text, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Ce que le widget affiche. Ajoute « Sommeil » depuis l'écran des widgets ; " +
+                    "Ce que le widget affiche. Ajoute « Sleep Track » depuis l'écran des widgets ; " +
                         "il se redimensionne de 4x2 jusqu'à 2x1.",
                     color = Palette.muted,
                     fontSize = 13.sp,
@@ -876,7 +953,8 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 Text("Sauvegarde", color = Palette.text, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Un fichier JSON lisible tel quel : une ligne par jour, avec minutes de " +
-                        "sommeil, pas, cœur au repos et poids. L'app garde son propre historique, " +
+                        "sommeil, pas, cœur au repos, poids, écran et VFC. Le score de récupération " +
+                        "n'y est pas : il se recalcule. L'app garde son propre historique, " +
                         "que l'export emporte en entier et que l'import complète sans rien écraser.",
                     color = Palette.muted,
                     fontSize = 13.sp,
@@ -885,7 +963,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                     OutlinedButton(
                         onClick = {
                             backupStatus = null
-                            exportLauncher.launch("sommeil-${LocalDate.now()}.json")
+                            exportLauncher.launch("sleeptrack-${LocalDate.now()}.json")
                         },
                         modifier = Modifier.weight(1f),
                     ) { Text("Exporter", color = Palette.text) }
@@ -899,7 +977,7 @@ private fun SettingsScreen(data: HealthData, onBack: () -> Unit) {
                 }
                 TextButton(onClick = {
                     backupStatus = null
-                    csvLauncher.launch("sommeil-${LocalDate.now()}.csv")
+                    csvLauncher.launch("sleeptrack-${LocalDate.now()}.csv")
                 }) {
                     Text("Exporter en CSV (pour un tableur)", color = Palette.muted, fontSize = 13.sp)
                 }

@@ -157,6 +157,7 @@ object DataCache {
         root.put("heart", jsonOf(data.heart.filterKeys { it > floor }))
         root.put("weight", jsonOf(data.weight.filterKeys { it > floor }))
         root.put("screen", jsonOf(data.screen.filterKeys { it > floor }))
+        root.put("hrv", jsonOf(data.hrv.filterKeys { it > floor }))
         val json = root.toString()
         if (json == raw(context)) return false
 
@@ -189,6 +190,7 @@ object DataCache {
                 heart = readMap(root, "heart"),
                 weight = readMap(root, "weight"),
                 screen = readMap(root, "screen"),
+                hrv = readMap(root, "hrv"),
             )
         }.getOrDefault(HealthData()).also { decoded = it }
     }

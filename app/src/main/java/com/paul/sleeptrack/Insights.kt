@@ -25,6 +25,7 @@ fun targetFor(metric: Metric, goalMinutes: Int): Target? = when (metric) {
     Metric.SLEEP -> Target(
         "nuits d'au moins ${formatDuration(Duration.ofMinutes(goalMinutes.toLong()))}"
     ) { it >= goalMinutes }
+    Metric.RECOVERY -> Target("journées au vert ($RECOVERY_GOOD ou plus)") { it >= RECOVERY_GOOD }
     Metric.STEPS -> Target("journées à 10 000 pas ou plus") { it >= 10_000 }
     Metric.HEART -> Target("journées à 58 bpm ou moins") { it <= 58 }
     Metric.SCREEN -> Target("journées sous 3h d'écran") { it < 180 }
@@ -198,6 +199,7 @@ private fun weekSentence(
             "Tes nuits les plus longues tombent le $high ($highText), les plus courtes le " +
                 "$low ($lowText) — $gap minutes d'écart."
         }
+        Metric.RECOVERY -> "Tu récupères le mieux le $high ($highText), le moins bien le $low ($lowText)."
         Metric.STEPS -> "Tu marches le plus le $high ($highText) et le moins le $low ($lowText)."
         Metric.HEART -> "Ton cœur au repos est au plus bas le $low ($lowText) et au plus haut " +
             "le $high ($highText)."
@@ -213,6 +215,7 @@ private fun dayName(day: DayOfWeek): String =
 /** Valeur raccourcie pour tenir sous une barre large d'un septième d'écran. */
 private fun compactValue(metric: Metric, value: Double): String = when (metric) {
     Metric.SLEEP -> formatDuration(Duration.ofMinutes(value.toLong()))
+    Metric.RECOVERY -> "%.0f".format(value)
     Metric.STEPS -> if (value >= 1_000) "%.1fk".format(Locale.FRENCH, value / 1_000) else "%.0f".format(value)
     Metric.HEART -> "%.0f".format(value)
     Metric.WEIGHT -> "%.1f".format(Locale.FRENCH, value)
