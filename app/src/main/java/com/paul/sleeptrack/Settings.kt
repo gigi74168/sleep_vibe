@@ -4,22 +4,31 @@ import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.paul.sleeptrack.ui.theme.AubeDimens
+import com.paul.sleeptrack.ui.theme.AubeType
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.Motion
 import com.paul.sleeptrack.ui.theme.TextRole
 import com.paul.sleeptrack.ui.theme.ThemeChoice
 import com.paul.sleeptrack.ui.theme.ThemeMode
@@ -182,7 +191,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
     Column(verticalArrangement = Arrangement.spacedBy(aubeOr(12.dp, AubeDimens.CardGap))) {
         Text("Réglages", color = c.ink, style = sleepText(TextRole.ScreenTitle, 20.sp, FontWeight.Bold))
 
-        Section("Apparence") {
+        Section("Apparence", R.drawable.ic_section_appearance) {
             SubHeading("Thème")
             ChoiceRow(
                 options = ThemeChoice.entries.map { it.key to it.label },
@@ -211,7 +220,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             )
         }
 
-        Section("Accueil", startExpanded = true) {
+        Section("Accueil", R.drawable.ic_tab_sunrise, startExpanded = true) {
             SettingSwitch(
                 title = "Carte de récupération",
                 subtitle = "Le score du matin, sur l'accueil",
@@ -253,7 +262,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             ) { next -> Prefs.setStartTab(context, next); home = Prefs.home(context) }
         }
 
-        Section("Score de récupération") {
+        Section("Score de récupération", R.drawable.ic_section_score) {
             Text(
                 "Une composante désactivée sort du calcul ; le score devient la moyenne de celles " +
                     "qui restent actives.",
@@ -274,7 +283,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             }
         }
 
-        Section("Objectifs") {
+        Section("Objectifs", R.drawable.ic_section_goals) {
             Stepper("Sommeil", formatDuration(Duration.ofMinutes(goals.sleepMinutes.toLong()))) { step ->
                 val next = (goals.sleepMinutes + step * 15).coerceIn(300, 600)
                 Prefs.setGoal(context, Prefs.GOAL_MINUTES, next)
@@ -297,7 +306,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             }
         }
 
-        Section("Métriques affichées") {
+        Section("Métriques affichées", R.drawable.ic_section_metrics) {
             Text(
                 "Masquer une métrique la retire des onglets, du détail d'une journée et des " +
                     "autorisations réclamées. Il en reste toujours au moins une.",
@@ -325,7 +334,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             }
         }
 
-        Section("Grilles") {
+        Section("Grilles", R.drawable.ic_tab_grid) {
             SettingSwitch(
                 title = "Statistiques",
                 subtitle = "Les quatre tuiles chiffrées sous la grille",
@@ -379,7 +388,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             ) { on -> Prefs.setFlag(context, Prefs.LANDSCAPE_BIG, on); display = Prefs.display(context) }
         }
 
-        Section("Rappels") {
+        Section("Rappels", R.drawable.ic_section_reminders) {
             SettingSwitch(
                 title = "Rappel du soir",
                 subtitle = "Si la moyenne des 7 derniers jours passe sous l'objectif",
@@ -414,7 +423,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             }
         }
 
-        Section("Widget") {
+        Section("Widget", R.drawable.ic_section_widget) {
             Text(
                 "Ce que le widget affiche. Ajoute « Sleep Track » depuis l'écran des widgets ; " +
                     "il se redimensionne de 4x2 jusqu'à 2x1.",
@@ -431,7 +440,7 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
             }
         }
 
-        Section("Sauvegarde") {
+        Section("Sauvegarde", R.drawable.ic_section_backup) {
             Text(
                 "Un fichier JSON lisible tel quel : une ligne par jour, avec minutes de sommeil, " +
                     "pas, écran et VFC. Le score de récupération n'y est pas : il se recalcule. " +
@@ -515,11 +524,63 @@ internal fun SettingsScreen(data: HealthData, onAppearanceChange: () -> Unit = {
     }
 }
 
-/** Un panneau repliable, avec son titre et un chevron qui indique l'état. */
+/**
+ * Un panneau repliable, avec son titre et un chevron qui indique l'état. En Aube : une carte
+ * avec son icône dans un rond, et un chevron qui pivote.
+ */
 @Composable
-private fun Section(title: String, startExpanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+private fun Section(title: String, icon: Int, startExpanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalSleepColors.current
     var expanded by remember { mutableStateOf(startExpanded) }
+    if (c.isAube) {
+        val rotation by animateFloatAsState(
+            if (expanded) 180f else 0f,
+            tween(220, easing = Motion.Standard),
+            label = "chevron",
+        )
+        Panel(CardKind.Section) {
+            Column(Modifier.fillMaxWidth().animateContentSize(tween(220, easing = Motion.Standard))) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button, onClickLabel = if (expanded) "Replier" else "Déplier") {
+                            expanded = !expanded
+                        }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .background(if (expanded) c.accentContainer else c.surface2, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painterResource(icon),
+                            contentDescription = null,
+                            tint = if (expanded) c.onAccentContainer else c.ink2,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Text(title, color = c.ink, style = AubeType.sectionTitle, modifier = Modifier.weight(1f))
+                    Icon(
+                        painterResource(R.drawable.ic_chevron_down),
+                        contentDescription = null,
+                        tint = c.ink2,
+                        modifier = Modifier.rotate(rotation),
+                    )
+                }
+                if (expanded) {
+                    Column(
+                        Modifier.padding(start = AubeDimens.CardPadding, end = AubeDimens.CardPadding, bottom = AubeDimens.CardPadding),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) { content() }
+                }
+            }
+        }
+        return
+    }
     Panel {
         Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -563,6 +624,10 @@ private fun ChoiceRow(
     onChange: (String) -> Unit,
 ) {
     val c = LocalSleepColors.current
+    if (c.isAube) {
+        PillChoice(options, current, enabled, onChange)
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -603,7 +668,7 @@ internal fun SettingSwitch(
     onChange: (Boolean) -> Unit,
 ) {
     val c = LocalSleepColors.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.heightIn(min = aubeOr(0.dp, AubeDimens.MinTouch)), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = if (enabled) c.ink else c.ink2, style = sleepText(TextRole.Body, 15.sp))
             if (subtitle.isNotEmpty()) Text(subtitle, color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
@@ -613,10 +678,23 @@ internal fun SettingSwitch(
             checked = checked,
             enabled = enabled,
             onCheckedChange = onChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = c.switchThumbOn,
-                checkedTrackColor = c.accent,
-            ),
+            colors = if (c.isAube) {
+                // Activé : piste accent, pouce blanc de 24 dp ; désactivé : piste Surface 2
+                // cerclée d'Encre 3, pouce de 16 dp (les tailles par défaut de Material 3).
+                SwitchDefaults.colors(
+                    checkedThumbColor = c.switchThumbOn,
+                    checkedTrackColor = c.accent,
+                    checkedBorderColor = c.accent,
+                    uncheckedThumbColor = c.ink3,
+                    uncheckedTrackColor = c.surface2,
+                    uncheckedBorderColor = c.ink3,
+                )
+            } else {
+                SwitchDefaults.colors(
+                    checkedThumbColor = c.switchThumbOn,
+                    checkedTrackColor = c.accent,
+                )
+            },
         )
     }
 }
@@ -626,8 +704,10 @@ internal fun Stepper(label: String, value: String, onStep: (Int) -> Unit) {
     val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = c.ink2, style = sleepText(TextRole.Body, 14.sp), modifier = Modifier.weight(1f))
-        ArrowButton("‹", enabled = true) { onStep(-1) }
+        ArrowButton("‹", enabled = true, description = "Moins") { onStep(-1) }
+        if (c.isAube) Spacer(Modifier.width(10.dp))
         Text(value, color = c.ink, style = sleepText(TextRole.Label, 16.sp, FontWeight.SemiBold))
-        ArrowButton("›", enabled = true) { onStep(1) }
+        if (c.isAube) Spacer(Modifier.width(10.dp))
+        ArrowButton("›", enabled = true, description = "Plus") { onStep(1) }
     }
 }

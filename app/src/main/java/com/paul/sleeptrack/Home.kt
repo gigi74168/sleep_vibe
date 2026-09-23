@@ -1,5 +1,6 @@
 package com.paul.sleeptrack
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -56,8 +57,14 @@ internal fun HomeScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Aujourd'hui", color = c.ink, style = sleepText(TextRole.ScreenTitle, 20.sp, FontWeight.Bold))
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onPersonalize) {
-                Text("Personnaliser", color = c.ink2, style = sleepText(TextRole.Label, 13.sp))
+            if (c.isAube) {
+                OutlinedButton(onClick = onPersonalize, border = BorderStroke(1.dp, c.outline)) {
+                    Text("Personnaliser", color = c.ink, style = AubeType.label)
+                }
+            } else {
+                TextButton(onClick = onPersonalize) {
+                    Text("Personnaliser", color = c.ink2, style = sleepText(TextRole.Label, 13.sp))
+                }
             }
         }
         Text(today.format(LongDate), color = c.ink2, style = sleepText(TextRole.Body, 14.sp))
@@ -69,6 +76,9 @@ internal fun HomeScreen(
                 RecoveryCard(recent, today, goals, home.gauge, home.breakdown, missingHrv, showNotes, onRequestPermissions)
             }
         }
+
+        // Aube : plus d'air entre la carte et les bandes, qui forment une autre section.
+        if (c.isAube && strips.isNotEmpty()) Spacer(Modifier.height(AubeDimens.SectionGap - AubeDimens.CardGap))
 
         strips.forEach { metric ->
             HomeStrip(
@@ -91,9 +101,14 @@ internal fun HomeScreen(
             )
         }
 
-        if (home.tapDetail && selected != null && strips.isNotEmpty()) {
-            DayDetail(selected!!, recent, visibleMetrics, goals)
-        }
+        DayDetailSlot(
+            selected = selected.takeIf { home.tapDetail && strips.isNotEmpty() },
+            data = recent,
+            visibleMetrics = visibleMetrics,
+            goals = goals,
+            range = today.minusDays(RECENT_DAYS - 1)..today,
+            onSelect = { selected = it },
+        )
 
         if (showNotes && strips.isNotEmpty()) {
             Text(
@@ -119,8 +134,9 @@ private fun HomeStrip(
     val c = LocalSleepColors.current
     val series = remember(metric, data) { data.series(metric) }
     val scale = remember(metric, goals, c) { scaleFor(metric, goals, c.levels) }
-    Panel {
-        Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // Aube : la bande se pose directement sur le fond ; Classique : dans sa carte, comme avant.
+    CardUnless(c.isAube) {
+        Column(Modifier.padding(aubeOr(16.dp, 0.dp)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     metric.label,
@@ -149,6 +165,11 @@ private fun HomeStrip(
             )
         }
     }
+}
+
+@Composable
+private fun CardUnless(bare: Boolean, content: @Composable () -> Unit) {
+    if (bare) Box { content() } else Panel { content() }
 }
 
 @Composable

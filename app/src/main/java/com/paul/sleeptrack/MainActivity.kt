@@ -8,11 +8,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -20,10 +31,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -36,7 +53,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.paul.sleeptrack.ui.theme.AubeDimens
 import com.paul.sleeptrack.ui.theme.AubeTokens
+import com.paul.sleeptrack.ui.theme.AubeType
 import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.Motion
 import com.paul.sleeptrack.ui.theme.SleepTheme
 import com.paul.sleeptrack.ui.theme.TextRole
 import com.paul.sleeptrack.ui.theme.aubeCard
@@ -87,7 +106,7 @@ private enum class Tab(val label: String, val icon: Int) {
 }
 
 /** Ce que l'accueil garde : de quoi remplir ses bandeaux, qui couvrent quelques mois. */
-private const val RECENT_DAYS = 200L
+internal const val RECENT_DAYS = 200L
 
 /** Le thème se choisit dans les réglages ; en mode Système, Aube suit le thème sombre d'Android. */
 @Composable
@@ -339,6 +358,21 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
 @Composable
 internal fun DemoBanner(onExitDemo: () -> Unit) {
     val c = LocalSleepColors.current
+    if (c.isAube) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(c.accentContainer, RoundedCornerShape(AubeDimens.SmallRadius))
+                .padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Données fictives", color = c.onAccentContainer, style = AubeType.label, modifier = Modifier.weight(1f))
+            TextButton(onClick = onExitDemo, modifier = Modifier.heightIn(min = AubeDimens.MinTouch)) {
+                Text("Quitter", color = c.onAccentContainer, style = AubeType.label)
+            }
+        }
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             "Mode démo (données fictives)",
@@ -396,8 +430,14 @@ private fun MainScreen(
                     var shareMenu by remember { mutableStateOf(false) }
                     // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
                     var sharing by remember { mutableStateOf(false) }
-                    TextButton(onClick = { shareMenu = true }) {
-                        Text("Partager", color = c.ink2, style = sleepText(TextRole.Label, 14.sp))
+                    if (c.isAube) {
+                        OutlinedButton(onClick = { shareMenu = true }, border = BorderStroke(1.dp, c.outline)) {
+                            Text("Partager", color = c.ink, style = AubeType.label)
+                        }
+                    } else {
+                        TextButton(onClick = { shareMenu = true }) {
+                            Text("Partager", color = c.ink2, style = sleepText(TextRole.Label, 14.sp))
+                        }
                     }
                     DropdownMenu(
                         expanded = shareMenu,
@@ -433,10 +473,13 @@ private fun MainScreen(
 
         Panel {
             Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    ArrowButton("‹", enabled = true) { onYear(year - 1) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(aubeOr(0.dp, 8.dp)),
+                ) {
+                    ArrowButton("‹", enabled = true, description = "Année précédente") { onYear(year - 1) }
                     Text("$year", color = c.ink, style = sleepText(TextRole.CardTitle, 34.sp, FontWeight.Bold))
-                    ArrowButton("›", enabled = year < currentYear) { onYear(year + 1) }
+                    ArrowButton("›", enabled = year < currentYear, description = "Année suivante") { onYear(year + 1) }
                     Spacer(Modifier.weight(1f))
                     Text(metric.countLabel(series.size), color = c.ink2, style = sleepText(TextRole.Caption, 18.sp))
                 }
@@ -451,9 +494,14 @@ private fun MainScreen(
             }
         }
 
-        if (display.dayDetail) {
-            selected?.let { day -> DayDetail(day, data, visibleMetrics, goals) }
-        }
+        DayDetailSlot(
+            selected = selected.takeIf { display.dayDetail },
+            data = data,
+            visibleMetrics = visibleMetrics,
+            goals = goals,
+            range = LocalDate.of(year, 1, 1)..minOf(LocalDate.of(year, 12, 31), today),
+            onSelect = { selected = it },
+        )
 
         if (metric == Metric.SCREEN && !demo && !hasUsageAccess(context)) {
             Panel {
@@ -548,6 +596,10 @@ private fun missingText(missing: Set<String>): String {
 @Composable
 internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metric) -> Unit) {
     val c = LocalSleepColors.current
+    if (c.isAube) {
+        PillChoice(entries.map { it to it.label }, metric, onChange = onMetric)
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -589,8 +641,23 @@ internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metr
 }
 
 @Composable
-internal fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun ArrowButton(symbol: String, enabled: Boolean, description: String? = null, onClick: () -> Unit) {
     val c = LocalSleepColors.current
+    if (c.isAube) {
+        Box(
+            Modifier
+                .size(AubeDimens.MinTouch)
+                .alpha(if (enabled) 1f else 0.38f)
+                .clip(CircleShape)
+                .background(c.surface2)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .semantics { if (description != null) contentDescription = description },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(symbol, color = c.ink, style = AubeType.label.copy(fontSize = 22.sp, lineHeight = 24.sp))
+        }
+        return
+    }
     TextButton(
         onClick = onClick,
         enabled = enabled,
@@ -609,17 +676,70 @@ internal enum class CardKind(val aubeRadius: Dp) {
 }
 
 @Composable
-internal fun Panel(kind: CardKind = CardKind.Section, content: @Composable () -> Unit) {
+internal fun Panel(kind: CardKind = CardKind.Section, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val c = LocalSleepColors.current
-    val base = Modifier.fillMaxWidth()
+    val base = modifier.fillMaxWidth()
     Box(
         if (c.isAube) base.aubeCard(c, kind.aubeRadius) else base.background(c.surface, RoundedCornerShape(20.dp))
     ) { content() }
 }
 
+/**
+ * Le détail du jour choisi. En Aube, il arrive en fondu en montant de 10 dp et se redimensionne
+ * en douceur ; ses boutons « Veille » et « Lendemain » restent dans [range]. En Classique, il
+ * apparaît d'un coup, comme avant.
+ */
 @Composable
-internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Metric>, goals: Goals) {
+internal fun DayDetailSlot(
+    selected: LocalDate?,
+    data: HealthData,
+    visibleMetrics: List<Metric>,
+    goals: Goals,
+    range: ClosedRange<LocalDate>,
+    onSelect: (LocalDate) -> Unit,
+) {
     val c = LocalSleepColors.current
+    if (!c.isAube) {
+        selected?.let { day -> DayDetail(day, data, visibleMetrics, goals) }
+        return
+    }
+    // Pendant qu'il s'efface, le détail garde le dernier jour montré.
+    val last = remember { mutableStateOf<LocalDate?>(null) }
+    SideEffect { if (selected != null) last.value = selected }
+    val day = selected ?: last.value
+    val rise = with(LocalDensity.current) { 10.dp.roundToPx() }
+    AnimatedVisibility(
+        visible = selected != null,
+        enter = fadeIn(tween(260, easing = Motion.Standard)) +
+            slideInVertically(tween(260, easing = Motion.Standard)) { rise },
+        exit = fadeOut(tween(200, easing = Motion.Standard)) + shrinkVertically(tween(200, easing = Motion.Standard)),
+    ) {
+        day?.let {
+            DayDetail(
+                it, data, visibleMetrics, goals,
+                modifier = Modifier.animateContentSize(tween(280, easing = Motion.Standard)),
+                onPrevious = it.minusDays(1).takeIf { d -> d in range }?.let { d -> { onSelect(d) } },
+                onNext = it.plusDays(1).takeIf { d -> d in range }?.let { d -> { onSelect(d) } },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun DayDetail(
+    day: LocalDate,
+    data: HealthData,
+    visibleMetrics: List<Metric>,
+    goals: Goals,
+    modifier: Modifier = Modifier,
+    onPrevious: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
+) {
+    val c = LocalSleepColors.current
+    if (c.isAube) {
+        AubeDayDetail(day, data, visibleMetrics, goals, modifier, onPrevious, onNext)
+        return
+    }
     Panel(CardKind.Main) {
         Column(Modifier.padding(aubeOr(16.dp, AubeDimens.CardPadding)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -640,6 +760,116 @@ internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Me
                     Text("Détail de la récupération", color = c.ink2, style = sleepText(TextRole.Caption, 12.sp))
                     RecoveryBreakdown(day, score, data, goals)
                 }
+            }
+        }
+    }
+}
+
+/** Aube : quatre tuiles (une par métrique visible), le détail du score, puis Veille et Lendemain. */
+@Composable
+private fun AubeDayDetail(
+    day: LocalDate,
+    data: HealthData,
+    visibleMetrics: List<Metric>,
+    goals: Goals,
+    modifier: Modifier,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+) {
+    val c = LocalSleepColors.current
+    Panel(CardKind.Main, modifier) {
+        Column(Modifier.padding(AubeDimens.CardPadding), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(day.format(LongDate).replaceFirstChar { it.uppercase() }, color = c.ink, style = AubeType.cardTitle)
+            visibleMetrics.chunked(2).forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    pair.forEach { metric -> DetailTile(metric, data.series(metric)[day], goals, Modifier.weight(1f)) }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+            if (Metric.RECOVERY in visibleMetrics) {
+                data.recovery[day]?.let { score ->
+                    Text("DÉTAIL DE LA RÉCUPÉRATION", color = c.ink2, style = AubeType.overline)
+                    RecoveryBreakdown(day, score, data, goals)
+                }
+            }
+            if (onPrevious != null || onNext != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DayNavButton("‹ Veille", onPrevious)
+                    Spacer(Modifier.weight(1f))
+                    DayNavButton("Lendemain ›", onNext)
+                }
+            }
+        }
+    }
+}
+
+/** Une tuile du détail : la pastille du niveau, le nom de la métrique, sa valeur. */
+@Composable
+private fun DetailTile(metric: Metric, value: Double?, goals: Goals, modifier: Modifier) {
+    val c = LocalSleepColors.current
+    val level = value?.let { scaleFor(metric, goals, c.levels).levelOf(it) }
+    Column(
+        modifier
+            .background(c.surface2, RoundedCornerShape(AubeDimens.TileRadius))
+            .padding(AubeDimens.TilePadding),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (level != null) {
+                Canvas(Modifier.size(10.dp)) { drawPastille(center, size.minDimension, CellContent.Level(level), c) }
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(metric.label, color = c.ink2, style = AubeType.caption, maxLines = 1)
+        }
+        Text(value?.let(metric::format) ?: "—", color = c.ink, style = AubeType.value, maxLines = 1)
+    }
+}
+
+@Composable
+private fun DayNavButton(label: String, onClick: (() -> Unit)?) {
+    val c = LocalSleepColors.current
+    TextButton(
+        onClick = { onClick?.invoke() },
+        enabled = onClick != null,
+        modifier = Modifier.heightIn(min = AubeDimens.MinTouch),
+    ) {
+        Text(label, color = if (onClick != null) c.accent else c.ink3, style = AubeType.label)
+    }
+}
+
+/** Aube : un choix exclusif en pilules, l'actif en Conteneur accent. Au moins 48 dp de haut. */
+@Composable
+internal fun <T> PillChoice(
+    options: List<Pair<T, String>>,
+    current: T,
+    enabled: Boolean = true,
+    onChange: (T) -> Unit,
+) {
+    val c = LocalSleepColors.current
+    Row(
+        Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { (value, label) ->
+            val active = value == current
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = AubeDimens.MinTouch)
+                    .clip(CircleShape)
+                    .background(if (active) c.accentContainer else c.surface)
+                    .border(1.dp, if (active) c.accentContainer else c.outline, CircleShape)
+                    .selectable(selected = active, enabled = enabled, role = Role.Tab) { onChange(value) }
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color = if (active) c.onAccentContainer else c.ink2,
+                    style = AubeType.label,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -672,6 +902,20 @@ private fun StatTileView(tile: StatTile, modifier: Modifier) {
         modifier.aubeCard(c, AubeDimens.TileRadius).padding(AubeDimens.TilePadding)
     } else {
         modifier.background(c.surface, RoundedCornerShape(16.dp)).padding(14.dp)
+    }
+    if (c.isAube) {
+        // La valeur reste lisible en encre ; le niveau passe par une pastille à côté du libellé.
+        Column(shaped, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (tile.color != c.ink2) {
+                    Box(Modifier.size(10.dp).background(tile.color, CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(tile.label, color = c.ink2, style = AubeType.caption, maxLines = 1)
+            }
+            Text(tile.value, color = c.ink, style = AubeType.value, maxLines = 1)
+        }
+        return
     }
     Box(shaped) {
         Column {
