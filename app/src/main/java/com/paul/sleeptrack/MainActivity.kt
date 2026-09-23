@@ -8,13 +8,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
@@ -24,6 +28,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -248,87 +253,106 @@ private fun SleepApp(onAppearanceChange: () -> Unit) {
         containerColor = c.background,
         bottomBar = { if (ready != null) BottomBar(tab, ::selectTab) },
     ) { insets ->
-        // Chaque onglet garde sa propre position de défilement.
-        val scroll = remember(tab) { ScrollState(0) }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .verticalScroll(scroll)
-                .padding(aubeOr(16.dp, AubeDimens.ScreenMargin))
-        ) {
-            when (val s = state) {
-                UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
-                    CircularProgressIndicator(color = c.accent)
-                }
-                UiState.NotInstalled -> Message(
-                    title = "Health Connect n'est pas disponible",
-                    body = "Installe ou mets à jour Health Connect depuis le Play Store, puis reviens ici.",
-                    action = "Ouvrir le Play Store",
-                    onAction = {
-                        val uri = Uri.parse("market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding")
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage("com.android.vending"))
-                        }
-                    },
-                    onDemo = { demo = true },
-                )
-                UiState.NeedsPermission -> Message(
-                    title = "Accès à tes données de santé",
-                    body = "Sleep Track lit tes nuits, tes pas et ta variabilité cardiaque dans " +
-                        "Health Connect pour dessiner tes grilles et calculer ta récupération. " +
-                        "Rien ne quitte ton téléphone.",
-                    action = "Autoriser l'accès",
-                    onAction = { permissionLauncher.launch(requested) },
-                    onDemo = { demo = true },
-                )
-                is UiState.Error -> Message(
-                    title = "Erreur de lecture",
-                    body = s.message,
-                    action = "Réessayer",
-                    onAction = { refreshKey++ },
-                    onDemo = { demo = true },
-                )
-                is UiState.Ready -> when (tab) {
-                    Tab.HOME -> HomeScreen(
-                        recent = s.recent,
-                        visibleMetrics = visibleMetrics,
-                        goals = goals,
-                        home = home,
-                        missingHrv = PERMISSION_READ_HRV in s.missing && !demo &&
-                            RecoveryComponent.HRV in recoveryConfig.components,
-                        showNotes = display.notes,
-                        demo = demo,
-                        onOpenMetric = {
-                            metric = it
-                            Prefs.setLastMetric(context, it)
-                            selectTab(Tab.GRIDS)
+        // Le contenu d'un onglet : chargement, erreur ou l'écran lui-même.
+        val tabContent: @Composable (Tab) -> Unit = { shownTab ->
+            // Chaque onglet garde sa propre position de défilement.
+            val scroll = remember(shownTab) { ScrollState(0) }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(insets)
+                    .verticalScroll(scroll)
+                    .padding(aubeOr(16.dp, AubeDimens.ScreenMargin))
+            ) {
+                when (val s = state) {
+                    UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
+                        CircularProgressIndicator(color = c.accent)
+                    }
+                    UiState.NotInstalled -> Message(
+                        title = "Health Connect n'est pas disponible",
+                        body = "Installe ou mets à jour Health Connect depuis le Play Store, puis reviens ici.",
+                        action = "Ouvrir le Play Store",
+                        onAction = {
+                            val uri = Uri.parse("market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding")
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage("com.android.vending"))
+                            }
                         },
-                        onRequestPermissions = { permissionLauncher.launch(requested) },
-                        onExitDemo = { demo = false },
-                        onPersonalize = { selectTab(Tab.SETTINGS) },
+                        onDemo = { demo = true },
                     )
-                    Tab.GRIDS -> MainScreen(
-                        year = year,
-                        metric = metric,
-                        visibleMetrics = visibleMetrics,
-                        goals = goals,
-                        display = display,
-                        data = s.data,
-                        missing = s.missing,
-                        requested = requested,
-                        demo = demo,
-                        onYear = { year = it },
-                        onMetric = {
-                            metric = it
-                            Prefs.setLastMetric(context, it)
-                        },
-                        onRequestPermissions = { permissionLauncher.launch(requested) },
-                        onExitDemo = { demo = false },
+                    UiState.NeedsPermission -> Message(
+                        title = "Accès à tes données de santé",
+                        body = "Sleep Track lit tes nuits, tes pas et ta variabilité cardiaque dans " +
+                            "Health Connect pour dessiner tes grilles et calculer ta récupération. " +
+                            "Rien ne quitte ton téléphone.",
+                        action = "Autoriser l'accès",
+                        onAction = { permissionLauncher.launch(requested) },
+                        onDemo = { demo = true },
                     )
-                    Tab.SETTINGS -> SettingsScreen(data = s.data, onAppearanceChange = onAppearanceChange)
+                    is UiState.Error -> Message(
+                        title = "Erreur de lecture",
+                        body = s.message,
+                        action = "Réessayer",
+                        onAction = { refreshKey++ },
+                        onDemo = { demo = true },
+                    )
+                    is UiState.Ready -> when (shownTab) {
+                        Tab.HOME -> HomeScreen(
+                            recent = s.recent,
+                            visibleMetrics = visibleMetrics,
+                            goals = goals,
+                            home = home,
+                            missingHrv = PERMISSION_READ_HRV in s.missing && !demo &&
+                                RecoveryComponent.HRV in recoveryConfig.components,
+                            showNotes = display.notes,
+                            demo = demo,
+                            onOpenMetric = {
+                                metric = it
+                                Prefs.setLastMetric(context, it)
+                                selectTab(Tab.GRIDS)
+                            },
+                            onRequestPermissions = { permissionLauncher.launch(requested) },
+                            onExitDemo = { demo = false },
+                            onPersonalize = { selectTab(Tab.SETTINGS) },
+                        )
+                        Tab.GRIDS -> MainScreen(
+                            year = year,
+                            metric = metric,
+                            visibleMetrics = visibleMetrics,
+                            goals = goals,
+                            display = display,
+                            data = s.data,
+                            missing = s.missing,
+                            requested = requested,
+                            demo = demo,
+                            onYear = { year = it },
+                            onMetric = {
+                                metric = it
+                                Prefs.setLastMetric(context, it)
+                            },
+                            onRequestPermissions = { permissionLauncher.launch(requested) },
+                            onExitDemo = { demo = false },
+                        )
+                        Tab.SETTINGS -> SettingsScreen(data = s.data, onAppearanceChange = onAppearanceChange)
+                    }
                 }
             }
+        }
+        if (c.isAube && ready != null) {
+            // Aube : le contenu arrive en fondu, en glissant de 14 dp du côté de l'onglet choisi.
+            val shift = with(LocalDensity.current) { 14.dp.roundToPx() }
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = {
+                    val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (fadeIn(tween(200, easing = Motion.Standard)) +
+                        slideInHorizontally(tween(200, easing = Motion.Standard)) { direction * shift })
+                        .togetherWith(fadeOut(tween(100, easing = Motion.Standard)))
+                },
+                label = "onglets",
+            ) { shown -> tabContent(shown) }
+        } else {
+            tabContent(tab)
         }
     }
 }
@@ -336,6 +360,10 @@ private fun SleepApp(onAppearanceChange: () -> Unit) {
 @Composable
 private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
     val c = LocalSleepColors.current
+    if (c.isAube) {
+        AubeBottomBar(current, onSelect)
+        return
+    }
     NavigationBar(containerColor = c.tabBar) {
         Tab.entries.forEach { entry ->
             NavigationBarItem(
@@ -351,6 +379,59 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
                     unselectedTextColor = c.ink2,
                 ),
             )
+        }
+    }
+}
+
+/**
+ * La barre d'onglets d'Aube : l'Accueil devient un soleil levant, et la pilule de l'onglet
+ * actif (64 × 32 dp, Conteneur accent) s'étire en 260 ms.
+ */
+@Composable
+private fun AubeBottomBar(current: Tab, onSelect: (Tab) -> Unit) {
+    val c = LocalSleepColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(c.tabBar)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .height(80.dp)
+            .selectableGroup(),
+    ) {
+        Tab.entries.forEach { entry ->
+            val selected = entry == current
+            val pill by animateDpAsState(
+                if (selected) 64.dp else 0.dp,
+                tween(260, easing = Motion.Standard),
+                label = "pilule",
+            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .selectable(selected = selected, role = Role.Tab) { onSelect(entry) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Box(Modifier.size(64.dp, 32.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(pill, 32.dp).background(c.accentContainer, CircleShape))
+                    Icon(
+                        painterResource(if (entry == Tab.HOME) R.drawable.ic_tab_sunrise else entry.icon),
+                        contentDescription = null,
+                        tint = if (selected) c.onAccentContainer else c.ink2,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    entry.label,
+                    color = if (selected) c.ink else c.ink2,
+                    style = AubeType.label.copy(
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                )
+            }
         }
     }
 }
