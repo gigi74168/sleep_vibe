@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.toArgb
+import com.paul.sleeptrack.ui.theme.SleepColors
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.TextStyle
@@ -37,9 +38,8 @@ fun renderStrip(
     data: HealthData,
     widthPx: Int,
     heightPx: Int,
+    colors: SleepColors,
     today: LocalDate = LocalDate.now(),
-    /** Le fond du widget ; l'accueil, qui pose la bande sur ses cartes, en prend la couleur. */
-    background: Int = Palette.bg.toArgb(),
     goals: Goals = Goals(),
 ): Bitmap {
     val bmp = Bitmap.createBitmap(widthPx.coerceAtLeast(100), heightPx.coerceAtLeast(60), Bitmap.Config.ARGB_8888)
@@ -47,7 +47,7 @@ fun renderStrip(
     val w = bmp.width.toFloat()
     val h = bmp.height.toFloat()
     val radius = h * 0.12f
-    canvas.drawRoundRect(RectF(0f, 0f, w, h), radius, radius, paint(background))
+    canvas.drawRoundRect(RectF(0f, 0f, w, h), radius, radius, paint(colors.background.toArgb()))
 
     val pad = h * 0.09f
     // Sous ~55dp de haut, l'en-tête mangerait la moitié de la tuile : la grille seule.
@@ -61,7 +61,7 @@ fun renderStrip(
     val weeks = (((w - 2 * pad) / pitch).toInt()).coerceIn(3, 40)
 
     val series = data.series(metric)
-    val scale = scaleFor(metric, goals)
+    val scale = scaleFor(metric, goals, colors.levels)
     val lastMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val gridStart = lastMonday.minusWeeks((weeks - 1).toLong())
     val shown = series.filterKeys { it >= gridStart && !it.isAfter(today) }
@@ -71,9 +71,9 @@ fun renderStrip(
         val summary = if (shown.isEmpty()) "aucune donnée" else {
             "moy. " + metric.format(shown.values.average())
         }
-        val titlePaint = paint(Palette.text.toArgb(), headerSize, bold = true)
+        val titlePaint = paint(colors.ink.toArgb(), headerSize, bold = true)
         canvas.drawText(title, pad, pad + headerSize, titlePaint)
-        val summaryPaint = paint(Palette.muted.toArgb(), headerSize * 0.85f)
+        val summaryPaint = paint(colors.ink2.toArgb(), headerSize * 0.85f)
         val summaryX = w - pad - summaryPaint.measureText(summary)
         // Sur un widget étroit le résumé mordrait sur le titre : dans ce cas on le laisse tomber.
         if (summaryX > pad + titlePaint.measureText(title) + headerSize * 0.5f) {
@@ -89,7 +89,7 @@ fun renderStrip(
             val day = gridStart.plusDays(col * 7L + row)
             if (day.isAfter(today)) continue
             val value = shown[day]
-            val color = value?.let { scale.colorOf(it).toArgb() } ?: Palette.empty.toArgb()
+            val color = value?.let { scale.colorOf(it).toArgb() } ?: colors.surface2.toArgb()
             canvas.cell(left + col * pitch + (pitch - side) / 2, gridTop + row * pitch + (pitch - side) / 2, side, color, brush)
         }
     }
@@ -102,10 +102,11 @@ fun renderYearCard(
     metric: Metric,
     data: HealthData,
     goals: Goals,
+    colors: SleepColors,
     widthPx: Int = 1400,
 ): Bitmap {
     val series = data.series(metric)
-    val scale = scaleFor(metric, goals)
+    val scale = scaleFor(metric, goals, colors.levels)
     val pad = widthPx * 0.05f
     val labelWidth = widthPx * 0.035f
 
@@ -130,10 +131,10 @@ fun renderYearCard(
 
     val bmp = Bitmap.createBitmap(widthPx, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bmp)
-    canvas.drawColor(Palette.bg.toArgb())
+    canvas.drawColor(colors.background.toArgb())
 
     var y = pad + titleSize
-    canvas.drawText("${metric.label} · $year", pad, y, paint(Palette.text.toArgb(), titleSize, bold = true))
+    canvas.drawText("${metric.label} · $year", pad, y, paint(colors.ink.toArgb(), titleSize, bold = true))
 
     y += subSize * 1.6f
     val subtitle = if (series.isEmpty()) {
@@ -141,11 +142,11 @@ fun renderYearCard(
     } else {
         "${metric.countLabel(series.size)} · moyenne ${metric.format(series.values.average())}"
     }
-    canvas.drawText(subtitle, pad, y, paint(Palette.muted.toArgb(), subSize))
+    canvas.drawText(subtitle, pad, y, paint(colors.ink2.toArgb(), subSize))
 
     // Mois
     y += monthBlock
-    val monthPaint = paint(Palette.muted.toArgb(), monthSize)
+    val monthPaint = paint(colors.ink2.toArgb(), monthSize)
     for (month in 1..12) {
         val col = (ChronoUnit.DAYS.between(gridStart, LocalDate.of(year, month, 1)) / 7).toInt()
         val name = LocalDate.of(year, month, 1).month
@@ -157,7 +158,7 @@ fun renderYearCard(
 
     // Grille
     val gridTop = y + monthSize * 0.6f
-    val dayPaint = paint(Palette.muted.toArgb(), monthSize)
+    val dayPaint = paint(colors.ink2.toArgb(), monthSize)
     listOf(0 to "Lun", 2 to "Mer", 4 to "Ven", 6 to "Dim").forEach { (row, label) ->
         canvas.drawText(label, pad, gridTop + row * pitch + side * 0.8f, dayPaint)
     }
@@ -166,7 +167,7 @@ fun renderYearCard(
         for (row in 0..6) {
             val day = gridStart.plusDays(col * 7L + row)
             if (day.year != year) continue
-            val color = series[day]?.let { scale.colorOf(it).toArgb() } ?: Palette.empty.toArgb()
+            val color = series[day]?.let { scale.colorOf(it).toArgb() } ?: colors.surface2.toArgb()
             canvas.cell(
                 pad + labelWidth + col * pitch + (pitch - side) / 2,
                 gridTop + row * pitch + (pitch - side) / 2,
@@ -179,7 +180,7 @@ fun renderYearCard(
 
     // Légende
     y = gridTop + gridBlock + smallSize * 1.8f
-    val legendPaint = paint(Palette.muted.toArgb(), smallSize)
+    val legendPaint = paint(colors.ink2.toArgb(), smallSize)
     var x = pad + labelWidth
     scale.colors.zip(scale.labels).forEach { (color, label) ->
         canvas.cell(x, y - smallSize * 0.85f, smallSize, color.toArgb(), brush)
@@ -190,7 +191,7 @@ fun renderYearCard(
 
     // Tuiles de statistiques
     y += smallSize * 1.6f
-    val tiles = statTiles(metric, data, scale, goals)
+    val tiles = statTiles(metric, data, scale, goals, colors.ink2)
     val tileWidth = (widthPx - 2 * pad - pad * 0.3f) / 2
     tiles.take(4).forEachIndexed { i, tile ->
         val tx = pad + (i % 2) * (tileWidth + pad * 0.3f)
@@ -198,9 +199,9 @@ fun renderYearCard(
         canvas.drawRoundRect(
             RectF(tx, ty, tx + tileWidth, ty + tileHeight),
             widthPx * 0.015f, widthPx * 0.015f,
-            paint(Palette.card.toArgb()),
+            paint(colors.surface.toArgb()),
         )
-        canvas.drawText(tile.label, tx + smallSize, ty + tileHeight * 0.38f, paint(Palette.muted.toArgb(), smallSize))
+        canvas.drawText(tile.label, tx + smallSize, ty + tileHeight * 0.38f, paint(colors.ink2.toArgb(), smallSize))
         canvas.drawText(
             tile.value,
             tx + smallSize,
@@ -210,6 +211,6 @@ fun renderYearCard(
     }
 
     y += tileHeight * 2 + pad * 0.3f + smallSize * 1.6f
-    canvas.drawText("Sleep Track · Health Connect", pad, y, paint(Palette.muted.toArgb(), smallSize))
+    canvas.drawText("Sleep Track · Health Connect", pad, y, paint(colors.ink2.toArgb(), smallSize))
     return bmp
 }

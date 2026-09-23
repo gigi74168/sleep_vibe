@@ -6,9 +6,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import java.time.LocalDate
 
 private val VERDICTS = listOf("Au ralenti", "Fatigué", "Correct", "Bien récupéré", "En pleine forme")
@@ -39,17 +40,18 @@ internal fun HomeScreen(
     onExitDemo: () -> Unit,
     onPersonalize: () -> Unit,
 ) {
+    val c = LocalSleepColors.current
     val today = LocalDate.now()
     var selected by remember { mutableStateOf<LocalDate?>(null) }
     val strips = Metric.entries.filter { it in home.strips && it in visibleMetrics }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Aujourd'hui", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Aujourd'hui", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onPersonalize) { Text("Personnaliser", color = Palette.muted, fontSize = 13.sp) }
+            TextButton(onClick = onPersonalize) { Text("Personnaliser", color = c.ink2, fontSize = 13.sp) }
         }
-        Text(today.format(Palette.longDate), color = Palette.muted, fontSize = 14.sp)
+        Text(today.format(LongDate), color = c.ink2, fontSize = 14.sp)
 
         if (demo) DemoBanner(onExitDemo)
 
@@ -75,7 +77,7 @@ internal fun HomeScreen(
         if (strips.isEmpty() && showNotes) {
             Text(
                 "Aucune bande à afficher : choisis-en dans les réglages de l'accueil.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
         }
@@ -87,7 +89,7 @@ internal fun HomeScreen(
         if (showNotes && strips.isNotEmpty()) {
             Text(
                 "Touche une case pour voir son détail, « Année › » pour ouvrir sa grille.",
-                color = Palette.muted.copy(alpha = 0.7f),
+                color = c.ink3,
                 fontSize = 11.sp,
             )
         }
@@ -105,18 +107,19 @@ private fun HomeStrip(
     onSelect: (LocalDate?) -> Unit,
     onOpenYear: () -> Unit,
 ) {
+    val c = LocalSleepColors.current
     val series = remember(metric, data) { data.series(metric) }
-    val scale = remember(metric, goals) { scaleFor(metric, goals) }
+    val scale = remember(metric, goals, c) { scaleFor(metric, goals, c.levels) }
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(metric.label, color = Palette.text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(metric.label, color = c.ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (series.isNotEmpty()) {
-                    Text("moy. ${metric.format(series.values.average())}", color = Palette.muted, fontSize = 12.sp)
+                    Text("moy. ${metric.format(series.values.average())}", color = c.ink2, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(10.dp))
                 TextButton(onClick = onOpenYear, contentPadding = PaddingValues(0.dp)) {
-                    Text("Année ›", color = Palette.muted, fontSize = 12.sp)
+                    Text("Année ›", color = c.ink2, fontSize = 12.sp)
                 }
             }
             RecentHeatmap(
@@ -141,26 +144,27 @@ private fun RecoveryCard(
     showNotes: Boolean,
     onRequestPermissions: () -> Unit,
 ) {
+    val c = LocalSleepColors.current
     // La nuit dernière n'est pas toujours déjà synchronisée : on se rabat sur celle d'avant.
     val latest = listOf(today, today.minusDays(1))
         .firstNotNullOfOrNull { day -> recent.recovery[day]?.let { day to it } }
-    val scale = remember(goals) { scaleFor(Metric.RECOVERY, goals) }
+    val scale = remember(goals, c) { scaleFor(Metric.RECOVERY, goals, c.levels) }
 
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Récupération", color = Palette.text, fontWeight = FontWeight.SemiBold)
+        Text("Récupération", color = c.ink, fontWeight = FontWeight.SemiBold)
 
         if (recent.recoveryConfig.components.isEmpty()) {
             Text(
                 "Aucune composante active : choisis-en au moins une dans les réglages du score " +
                     "de récupération.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
         } else if (latest == null) {
             Text(
                 "Pas encore de score. Il faut la nuit dernière et au moins une autre composante " +
                     "active, comparée à ta propre moyenne, qui demande une semaine de relevés.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
         } else {
@@ -175,7 +179,7 @@ private fun RecoveryCard(
                             val arcSize = Size(size.width - stroke, size.height - stroke)
                             val topLeft = Offset(inset, inset)
                             // Un arc de 270°, ouvert en bas, comme une jauge.
-                            drawArc(Palette.empty, 135f, 270f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+                            drawArc(c.surface2, 135f, 270f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
                             drawArc(
                                 color, 135f, 270f * score.total / 100f, false, topLeft, arcSize,
                                 style = Stroke(stroke, cap = StrokeCap.Round),
@@ -199,7 +203,7 @@ private fun RecoveryCard(
                     }
                     Text(
                         if (day == today) "Ce matin, sur 100" else "Hier matin : la nuit dernière n'est pas encore là",
-                        color = Palette.muted,
+                        color = c.ink2,
                         fontSize = 13.sp,
                     )
                 }
@@ -211,17 +215,17 @@ private fun RecoveryCard(
             Text(
                 "Sans la variabilité cardiaque, le score repose sur les autres composantes actives : " +
                     "autorise-la dans Health Connect pour le compléter.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
             OutlinedButton(onClick = onRequestPermissions) {
-                Text("Autoriser la VFC", color = Palette.text)
+                Text("Autoriser la VFC", color = c.ink)
             }
         } else if (showNotes && recent.hrv.isEmpty() && RecoveryComponent.HRV in recent.recoveryConfig.components) {
             Text(
                 "Aucune VFC trouvée dans Health Connect : ta montre n'en enregistre peut-être " +
                     "pas. Le score se calcule sans elle.",
-                color = Palette.muted.copy(alpha = 0.7f),
+                color = c.ink3,
                 fontSize = 11.sp,
             )
         }
@@ -229,7 +233,7 @@ private fun RecoveryCard(
             Text(
                 "Chaque composante se compare à tes semaines précédentes ; une grosse journée de " +
                     "pas la veille fait baisser le score. Indicatif, pas médical.",
-                color = Palette.muted.copy(alpha = 0.7f),
+                color = c.ink3,
                 fontSize = 11.sp,
             )
         }
@@ -239,7 +243,8 @@ private fun RecoveryCard(
 /** Les composantes actives d'un score : la valeur mesurée, puis ce qu'elle rapporte sur 100. */
 @Composable
 internal fun RecoveryBreakdown(day: LocalDate, score: RecoveryScore, data: HealthData, goals: Goals) {
-    val scale = scaleFor(Metric.RECOVERY, goals)
+    val c = LocalSleepColors.current
+    val scale = scaleFor(Metric.RECOVERY, goals, c.levels)
     val active = data.recoveryConfig.components
     val yesterdaySteps = data.steps[day.minusDays(1)]
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

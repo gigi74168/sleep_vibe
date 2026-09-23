@@ -12,10 +12,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,6 +29,7 @@ private const val SAMPLE = "sample"
 
 @Composable
 internal fun SettingsScreen(data: HealthData) {
+    val c = LocalSleepColors.current
     val context = LocalContext.current
     var evening by remember { mutableStateOf(Prefs.eveningEnabled(context)) }
     var eveningHour by remember { mutableIntStateOf(Prefs.eveningHour(context)) }
@@ -163,7 +166,7 @@ internal fun SettingsScreen(data: HealthData) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Réglages", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Réglages", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
         Section("Accueil", startExpanded = true) {
             SettingSwitch(
@@ -183,7 +186,7 @@ internal fun SettingsScreen(data: HealthData) {
                     checked = home.breakdown,
                 ) { on -> Prefs.setHomeFlag(context, Prefs.HOME_BREAKDOWN, on); home = Prefs.home(context) }
             }
-            Text("Bandes affichées", color = Palette.text, fontWeight = FontWeight.SemiBold)
+            Text("Bandes affichées", color = c.ink, fontWeight = FontWeight.SemiBold)
             Metric.entries.filter { it in visible }.forEach { m ->
                 SettingSwitch(title = m.label, subtitle = "", checked = m in home.strips) { on ->
                     val next = if (on) home.strips + m else home.strips - m
@@ -200,7 +203,7 @@ internal fun SettingsScreen(data: HealthData) {
                 subtitle = "Toucher une case de l'accueil ouvre le détail du jour",
                 checked = home.tapDetail,
             ) { on -> Prefs.setHomeFlag(context, Prefs.HOME_TAP_DETAIL, on); home = Prefs.home(context) }
-            Text("Onglet d'ouverture", color = Palette.text, fontWeight = FontWeight.SemiBold)
+            Text("Onglet d'ouverture", color = c.ink, fontWeight = FontWeight.SemiBold)
             TabChoice(home.startTab) { next -> Prefs.setStartTab(context, next); home = Prefs.home(context) }
         }
 
@@ -208,12 +211,12 @@ internal fun SettingsScreen(data: HealthData) {
             Text(
                 "Une composante désactivée sort du calcul ; le score devient la moyenne de celles " +
                     "qui restent actives.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 12.sp,
             )
-            RecoveryComponent.entries.forEach { c ->
-                SettingSwitch(title = c.label, subtitle = "", checked = c in recovery.components) { on ->
-                    Prefs.setRecoveryComponent(context, c, on)
+            RecoveryComponent.entries.forEach { component ->
+                SettingSwitch(title = component.label, subtitle = "", checked = component in recovery.components) { on ->
+                    Prefs.setRecoveryComponent(context, component, on)
                     recovery = Prefs.recoveryConfig(context)
                 }
             }
@@ -252,7 +255,7 @@ internal fun SettingsScreen(data: HealthData) {
             Text(
                 "Masquer une métrique la retire des onglets, du détail d'une journée et des " +
                     "autorisations réclamées. Il en reste toujours au moins une.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 12.sp,
             )
             Metric.entries.forEach { entry ->
@@ -361,7 +364,7 @@ internal fun SettingsScreen(data: HealthData) {
                     notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }) {
-                Text("Voir un exemple de résumé", color = Palette.text)
+                Text("Voir un exemple de résumé", color = c.ink)
             }
         }
 
@@ -369,7 +372,7 @@ internal fun SettingsScreen(data: HealthData) {
             Text(
                 "Ce que le widget affiche. Ajoute « Sleep Track » depuis l'écran des widgets ; " +
                     "il se redimensionne de 4x2 jusqu'à 2x1.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
             MetricSwitch(widgetMetric, visible) {
@@ -378,7 +381,7 @@ internal fun SettingsScreen(data: HealthData) {
                 updateAllWidgets(context)
             }
             OutlinedButton(onClick = { updateAllWidgets(context) }) {
-                Text("Rafraîchir le widget", color = Palette.text)
+                Text("Rafraîchir le widget", color = c.ink)
             }
         }
 
@@ -388,7 +391,7 @@ internal fun SettingsScreen(data: HealthData) {
                     "pas, écran et VFC. Le score de récupération n'y est pas : il se recalcule. " +
                     "L'app garde son propre historique, que l'export emporte en entier et que " +
                     "l'import complète sans rien écraser.",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -398,22 +401,22 @@ internal fun SettingsScreen(data: HealthData) {
                         exportLauncher.launch("sleeptrack-${LocalDate.now()}.json")
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("Exporter", color = Palette.text) }
+                ) { Text("Exporter", color = c.ink) }
                 OutlinedButton(
                     onClick = {
                         backupStatus = null
                         importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("Importer", color = Palette.text) }
+                ) { Text("Importer", color = c.ink) }
             }
             TextButton(onClick = {
                 backupStatus = null
                 csvLauncher.launch("sleeptrack-${LocalDate.now()}.csv")
             }) {
-                Text("Exporter en CSV (pour un tableur)", color = Palette.muted, fontSize = 13.sp)
+                Text("Exporter en CSV (pour un tableur)", color = c.ink2, fontSize = 13.sp)
             }
-            backupStatus?.let { Text(it, color = Palette.levels[3], fontSize = 13.sp) }
+            backupStatus?.let { Text(it, color = c.positive, fontSize = 13.sp) }
             TextButton(onClick = {
                 if (confirmClear) {
                     Archive.clear(context)
@@ -425,7 +428,7 @@ internal fun SettingsScreen(data: HealthData) {
             }) {
                 Text(
                     if (confirmClear) "Confirmer l'effacement" else "Effacer l'historique local",
-                    color = if (confirmClear) Palette.levels[0] else Palette.muted,
+                    color = if (confirmClear) c.danger else c.ink2,
                     fontSize = 13.sp,
                 )
             }
@@ -445,13 +448,13 @@ internal fun SettingsScreen(data: HealthData) {
                 }) {
                     Text(
                         if (confirmReset) "Confirmer : tout remettre par défaut" else "Rétablir les réglages par défaut",
-                        color = if (confirmReset) Palette.levels[0] else Palette.muted,
+                        color = if (confirmReset) c.danger else c.ink2,
                         fontSize = 13.sp,
                     )
                 }
                 Text(
                     "Ne touche pas aux données : seulement à ce qui est réglable ici.",
-                    color = Palette.muted.copy(alpha = 0.7f),
+                    color = c.ink3,
                     fontSize = 11.sp,
                 )
             }
@@ -460,7 +463,7 @@ internal fun SettingsScreen(data: HealthData) {
         Text(
             "Tout est calculé et gardé sur le téléphone. Rien ne part ailleurs, sauf le " +
                 "fichier que tu exportes toi-même.",
-            color = Palette.muted.copy(alpha = 0.7f),
+            color = c.ink3,
             fontSize = 11.sp,
         )
     }
@@ -469,6 +472,7 @@ internal fun SettingsScreen(data: HealthData) {
 /** Un panneau repliable, avec son titre et un chevron qui indique l'état. */
 @Composable
 private fun Section(title: String, startExpanded: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalSleepColors.current
     var expanded by remember { mutableStateOf(startExpanded) }
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -476,8 +480,8 @@ private fun Section(title: String, startExpanded: Boolean = false, content: @Com
                 Modifier.fillMaxWidth().clickable { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(title, color = Palette.text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                Text(if (expanded) "▾" else "▸", color = Palette.muted, fontSize = 16.sp)
+                Text(title, color = c.ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Text(if (expanded) "▾" else "▸", color = c.ink2, fontSize = 16.sp)
             }
             if (expanded) content()
         }
@@ -486,10 +490,11 @@ private fun Section(title: String, startExpanded: Boolean = false, content: @Com
 
 @Composable
 private fun TabChoice(current: String, onChange: (String) -> Unit) {
+    val c = LocalSleepColors.current
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Palette.empty, RoundedCornerShape(14.dp))
+            .background(c.surface2, RoundedCornerShape(14.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -499,14 +504,14 @@ private fun TabChoice(current: String, onChange: (String) -> Unit) {
                 Modifier
                     .weight(1f)
                     .background(
-                        if (active) Palette.levels.last() else androidx.compose.ui.graphics.Color.Transparent,
+                        if (active) c.accent else Color.Transparent,
                         RoundedCornerShape(11.dp),
                     )
                     .clickable { onChange(value) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, color = if (active) Palette.bg else Palette.muted, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                Text(label, color = if (active) c.onAccent else c.ink2, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
             }
         }
     }
@@ -520,10 +525,11 @@ internal fun SettingSwitch(
     enabled: Boolean = true,
     onChange: (Boolean) -> Unit,
 ) {
+    val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = if (enabled) Palette.text else Palette.muted, fontSize = 15.sp)
-            if (subtitle.isNotEmpty()) Text(subtitle, color = Palette.muted, fontSize = 12.sp)
+            Text(title, color = if (enabled) c.ink else c.ink2, fontSize = 15.sp)
+            if (subtitle.isNotEmpty()) Text(subtitle, color = c.ink2, fontSize = 12.sp)
         }
         Spacer(Modifier.width(12.dp))
         Switch(
@@ -531,8 +537,8 @@ internal fun SettingSwitch(
             enabled = enabled,
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Palette.bg,
-                checkedTrackColor = Palette.levels.last(),
+                checkedThumbColor = c.switchThumbOn,
+                checkedTrackColor = c.accent,
             ),
         )
     }
@@ -540,10 +546,11 @@ internal fun SettingSwitch(
 
 @Composable
 internal fun Stepper(label: String, value: String, onStep: (Int) -> Unit) {
+    val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Palette.muted, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text(label, color = c.ink2, fontSize = 14.sp, modifier = Modifier.weight(1f))
         ArrowButton("‹", enabled = true) { onStep(-1) }
-        Text(value, color = Palette.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         ArrowButton("›", enabled = true) { onStep(1) }
     }
 }

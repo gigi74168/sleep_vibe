@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,9 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.paul.sleeptrack.ui.theme.AubeTokens
+import com.paul.sleeptrack.ui.theme.LocalSleepColors
+import com.paul.sleeptrack.ui.theme.SleepTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -56,11 +60,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         enableEdgeToEdge()
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme(background = Palette.bg, surface = Palette.card)) {
-                SleepApp()
-            }
-        }
+        setContent { SleepRoot() }
     }
 }
 
@@ -82,8 +82,18 @@ private enum class Tab(val label: String, val icon: Int) {
 /** Ce que l'accueil garde : de quoi remplir ses bandeaux, qui couvrent quelques mois. */
 private const val RECENT_DAYS = 200L
 
+/** Le thème se choisit dans les réglages ; en mode Système, Aube suit le thème sombre d'Android. */
+@Composable
+private fun SleepRoot() {
+    val context = LocalContext.current
+    val appearance by remember { mutableStateOf(Prefs.appearance(context)) }
+    val colors = AubeTokens.resolve(appearance.theme, appearance.mode, isSystemInDarkTheme())
+    SleepTheme(colors) { SleepApp() }
+}
+
 @Composable
 private fun SleepApp() {
+    val c = LocalSleepColors.current
     val context = LocalContext.current
     var year by remember { mutableIntStateOf(LocalDate.now().year) }
     var metric by remember { mutableStateOf(Prefs.lastMetric(context)) }
@@ -209,7 +219,7 @@ private fun SleepApp() {
 
     val ready = state as? UiState.Ready
     Scaffold(
-        containerColor = Palette.bg,
+        containerColor = c.background,
         bottomBar = { if (ready != null) BottomBar(tab, ::selectTab) },
     ) { insets ->
         // Chaque onglet garde sa propre position de défilement.
@@ -223,7 +233,7 @@ private fun SleepApp() {
         ) {
             when (val s = state) {
                 UiState.Loading -> Box(Modifier.fillMaxWidth().padding(top = 120.dp), Alignment.Center) {
-                    CircularProgressIndicator(color = Palette.levels.last())
+                    CircularProgressIndicator(color = c.accent)
                 }
                 UiState.NotInstalled -> Message(
                     title = "Health Connect n'est pas disponible",
@@ -299,7 +309,8 @@ private fun SleepApp() {
 
 @Composable
 private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
-    NavigationBar(containerColor = Palette.card) {
+    val c = LocalSleepColors.current
+    NavigationBar(containerColor = c.tabBar) {
         Tab.entries.forEach { entry ->
             NavigationBarItem(
                 selected = entry == current,
@@ -307,11 +318,11 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
                 icon = { Icon(painterResource(entry.icon), contentDescription = null) },
                 label = { Text(entry.label) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Palette.bg,
-                    selectedTextColor = Palette.text,
-                    indicatorColor = Palette.levels.last(),
-                    unselectedIconColor = Palette.muted,
-                    unselectedTextColor = Palette.muted,
+                    selectedIconColor = c.onAccentContainer,
+                    selectedTextColor = c.ink,
+                    indicatorColor = c.accentContainer,
+                    unselectedIconColor = c.ink2,
+                    unselectedTextColor = c.ink2,
                 ),
             )
         }
@@ -320,9 +331,10 @@ private fun BottomBar(current: Tab, onSelect: (Tab) -> Unit) {
 
 @Composable
 internal fun DemoBanner(onExitDemo: () -> Unit) {
+    val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Mode démo (données fictives)", color = Palette.levels[2], fontSize = 13.sp, modifier = Modifier.weight(1f))
-        TextButton(onClick = onExitDemo) { Text("Quitter", color = Palette.text) }
+        Text("Mode démo (données fictives)", color = c.notice, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        TextButton(onClick = onExitDemo) { Text("Quitter", color = c.ink) }
     }
 }
 
@@ -342,12 +354,13 @@ private fun MainScreen(
     onRequestPermissions: () -> Unit,
     onExitDemo: () -> Unit,
 ) {
+    val c = LocalSleepColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selected by remember(year) { mutableStateOf<LocalDate?>(null) }
     val today = LocalDate.now()
     val currentYear = today.year
-    val scale = remember(metric, goals) { scaleFor(metric, goals) }
+    val scale = remember(metric, goals, c) { scaleFor(metric, goals, c.levels) }
     val series = remember(metric, data) { data.series(metric) }
     val config = LocalConfiguration.current
     // À l'horizontale, l'écran est large et court : on donne aux cases la hauteur
@@ -364,7 +377,7 @@ private fun MainScreen(
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Grilles", color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("Grilles", color = c.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             if (display.showShare) {
                 Box {
@@ -372,16 +385,16 @@ private fun MainScreen(
                     // Un seul rendu à la fois : deux images 4K en parallèle, c'est 80 Mo.
                     var sharing by remember { mutableStateOf(false) }
                     TextButton(onClick = { shareMenu = true }) {
-                        Text("Partager", color = Palette.muted, fontSize = 14.sp)
+                        Text("Partager", color = c.ink2, fontSize = 14.sp)
                     }
                     DropdownMenu(
                         expanded = shareMenu,
                         onDismissRequest = { shareMenu = false },
-                        containerColor = Palette.card,
+                        containerColor = c.surface,
                     ) {
                         ShareQuality.entries.forEach { quality ->
                             DropdownMenuItem(
-                                text = { Text(quality.label, color = Palette.text) },
+                                text = { Text(quality.label, color = c.ink) },
                                 onClick = {
                                     shareMenu = false
                                     if (!sharing) {
@@ -410,10 +423,10 @@ private fun MainScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ArrowButton("‹", enabled = true) { onYear(year - 1) }
-                    Text("$year", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Palette.text)
+                    Text("$year", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = c.ink)
                     ArrowButton("›", enabled = year < currentYear) { onYear(year + 1) }
                     Spacer(Modifier.weight(1f))
-                    Text(metric.countLabel(series.size), fontSize = 18.sp, color = Palette.muted)
+                    Text(metric.countLabel(series.size), fontSize = 18.sp, color = c.ink2)
                 }
                 YearHeatmap(
                     year = year,
@@ -436,17 +449,17 @@ private fun MainScreen(
                     Text(
                         "Le temps d'écran ne vient pas de Health Connect mais d'Android. Autorise " +
                             "Sleep Track dans « Accès aux données d'utilisation », puis reviens ici.",
-                        color = Palette.muted,
+                        color = c.ink2,
                         fontSize = 13.sp,
                     )
                     OutlinedButton(onClick = { openUsageAccessSettings(context) }) {
-                        Text("Ouvrir le réglage", color = Palette.text)
+                        Text("Ouvrir le réglage", color = c.ink)
                     }
                     if (display.notes) {
                         Text(
                             "Android n'en garde qu'une dizaine de jours : l'historique commence là, " +
                                 "puis s'allonge à chaque ouverture de l'app.",
-                            color = Palette.muted.copy(alpha = 0.7f),
+                            color = c.ink3,
                             fontSize = 11.sp,
                         )
                     }
@@ -461,13 +474,13 @@ private fun MainScreen(
             // fait partie des clés, les tuiles « 7 derniers jours » et « série en cours » en
             // dépendent.
             if (display.stats) {
-                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale, goals) }
+                val tiles = remember(metric, data, scale, today) { statTiles(metric, data, scale, goals, c.ink2) }
                 StatRow(tiles[0], tiles[1])
                 StatRow(tiles[2], tiles[3])
             }
             if (display.streaks) {
-                val streaks = remember(metric, data, goals, year, today) {
-                    streakTiles(metric, data, goals, year, today)
+                val streaks = remember(metric, data, goals, year, today, c) {
+                    streakTiles(metric, data, goals, year, c.levels, c.ink2, today)
                 }
                 streaks?.let { (current, best) ->
                     StatRow(current, best)
@@ -493,9 +506,9 @@ private fun MainScreen(
         if (relevantMissing.isNotEmpty() && !demo) {
             Panel {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(missingText(relevantMissing), color = Palette.muted, fontSize = 13.sp)
+                    Text(missingText(relevantMissing), color = c.ink2, fontSize = 13.sp)
                     OutlinedButton(onClick = onRequestPermissions) {
-                        Text("Compléter les autorisations", color = Palette.text)
+                        Text("Compléter les autorisations", color = c.ink)
                     }
                 }
             }
@@ -522,10 +535,11 @@ private fun missingText(missing: Set<String>): String {
 
 @Composable
 internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metric) -> Unit) {
+    val c = LocalSleepColors.current
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Palette.card, RoundedCornerShape(14.dp))
+            .background(c.surface, RoundedCornerShape(14.dp))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -535,7 +549,7 @@ internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metr
                 Modifier
                     .weight(1f)
                     .background(
-                        if (active) Palette.empty else Color.Transparent,
+                        if (active) c.surface2 else Color.Transparent,
                         RoundedCornerShape(11.dp),
                     )
                     .clickable { onMetric(entry) }
@@ -544,7 +558,7 @@ internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metr
             ) {
                 Text(
                     entry.label,
-                    color = if (active) Palette.text else Palette.muted,
+                    color = if (active) c.ink else c.ink2,
                     fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                     fontSize = when {
                         entries.size > 5 -> 11.sp
@@ -561,32 +575,35 @@ internal fun MetricSwitch(metric: Metric, entries: List<Metric>, onMetric: (Metr
 
 @Composable
 internal fun ArrowButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    val c = LocalSleepColors.current
     TextButton(
         onClick = onClick,
         enabled = enabled,
         contentPadding = PaddingValues(0.dp),
         modifier = Modifier.width(36.dp),
     ) {
-        Text(symbol, fontSize = 30.sp, color = if (enabled) Palette.muted else Palette.card)
+        Text(symbol, fontSize = 30.sp, color = if (enabled) c.ink2 else c.surface)
     }
 }
 
 @Composable
 internal fun Panel(content: @Composable () -> Unit) {
+    val c = LocalSleepColors.current
     Box(
         Modifier
             .fillMaxWidth()
-            .background(Palette.card, RoundedCornerShape(20.dp))
+            .background(c.surface, RoundedCornerShape(20.dp))
     ) { content() }
 }
 
 @Composable
 internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Metric>, goals: Goals) {
+    val c = LocalSleepColors.current
     Panel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                day.format(Palette.longDate).replaceFirstChar { it.uppercase() },
-                color = Palette.text,
+                day.format(LongDate).replaceFirstChar { it.uppercase() },
+                color = c.ink,
                 fontWeight = FontWeight.SemiBold,
             )
             visibleMetrics.forEach { entry ->
@@ -594,12 +611,12 @@ internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Me
                 DetailLine(
                     entry.detailLabel,
                     value?.let(entry::format) ?: "Aucune donnée",
-                    value?.let { scaleFor(entry, goals).colorOf(it) },
+                    value?.let { scaleFor(entry, goals, c.levels).colorOf(it) },
                 )
             }
             if (Metric.RECOVERY in visibleMetrics) {
                 data.recovery[day]?.let { score ->
-                    Text("Détail de la récupération", color = Palette.muted, fontSize = 12.sp)
+                    Text("Détail de la récupération", color = c.ink2, fontSize = 12.sp)
                     RecoveryBreakdown(day, score, data, goals)
                 }
             }
@@ -609,11 +626,12 @@ internal fun DayDetail(day: LocalDate, data: HealthData, visibleMetrics: List<Me
 
 @Composable
 internal fun DetailLine(label: String, value: String, color: Color?) {
+    val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(14.dp).background(color ?: Palette.empty, RoundedCornerShape(4.dp)))
+        Box(Modifier.size(14.dp).background(color ?: c.surface2, RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(10.dp))
-        Text(label, color = Palette.muted, modifier = Modifier.weight(1f), fontSize = 14.sp)
-        Text(value, color = color ?: Palette.muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text(label, color = c.ink2, modifier = Modifier.weight(1f), fontSize = 14.sp)
+        Text(value, color = color ?: c.ink2, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
     }
 }
 
@@ -627,9 +645,10 @@ private fun StatRow(left: StatTile, right: StatTile) {
 
 @Composable
 private fun StatTileView(tile: StatTile, modifier: Modifier) {
-    Box(modifier.background(Palette.card, RoundedCornerShape(16.dp)).padding(14.dp)) {
+    val c = LocalSleepColors.current
+    Box(modifier.background(c.surface, RoundedCornerShape(16.dp)).padding(14.dp)) {
         Column {
-            Text(tile.label, color = Palette.muted, fontSize = 12.sp)
+            Text(tile.label, color = c.ink2, fontSize = 12.sp)
             Text(tile.value, color = tile.color, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
     }
@@ -637,22 +656,24 @@ private fun StatTileView(tile: StatTile, modifier: Modifier) {
 
 @Composable
 private fun EmptyNote(text: String) {
-    Text(text, color = Palette.muted, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+    val c = LocalSleepColors.current
+    Text(text, color = c.ink2, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
 }
 
 @Composable
 private fun Message(title: String, body: String, action: String, onAction: () -> Unit, onDemo: () -> Unit) {
+    val c = LocalSleepColors.current
     Column(
         Modifier.fillMaxWidth().padding(top = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(title, color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Text(body, color = Palette.muted, fontSize = 15.sp, textAlign = TextAlign.Center)
+        Text(title, color = c.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text(body, color = c.ink2, fontSize = 15.sp, textAlign = TextAlign.Center)
         Button(
             onClick = onAction,
-            colors = ButtonDefaults.buttonColors(containerColor = Palette.levels.last(), contentColor = Palette.bg),
+            colors = ButtonDefaults.buttonColors(containerColor = c.accent, contentColor = c.onAccent),
         ) { Text(action) }
-        TextButton(onClick = onDemo) { Text("Voir une démo", color = Palette.muted) }
+        TextButton(onClick = onDemo) { Text("Voir une démo", color = c.ink2) }
     }
 }

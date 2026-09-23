@@ -21,6 +21,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -29,24 +30,7 @@ import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
-object Palette {
-    val bg = Color(0xFF0D0D0D)
-    val card = Color(0xFF171717)
-    val empty = Color(0xFF262626)
-    val text = Color(0xFFF2F2F2)
-    val muted = Color(0xFF8A8A8A)
-
-    // Du pire au meilleur : rouge, orange, jaune, vert clair, vert vif.
-    val levels = listOf(
-        Color(0xFFE5484D),
-        Color(0xFFF2994A),
-        Color(0xFFF2C94C),
-        Color(0xFF8BD17C),
-        Color(0xFF2ECC71),
-    )
-
-    val longDate: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
-}
+val LongDate: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRENCH)
 
 private val DAY_LABELS = listOf("Lun", "", "Mer", "", "Ven", "", "Dim")
 
@@ -71,6 +55,7 @@ fun YearHeatmap(
     val currentColorAt = rememberUpdatedState(colorAt)
     val scrollState = rememberScrollState()
     val today = LocalDate.now()
+    val c = LocalSleepColors.current
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val fitPitch = (maxWidth - labelWidth) / weeks
@@ -86,7 +71,7 @@ fun YearHeatmap(
                 DAY_LABELS.forEach { label ->
                     Box(Modifier.height(pitch), contentAlignment = Alignment.CenterStart) {
                         if (label.isNotEmpty()) {
-                            Text(label, color = Palette.muted, fontSize = labelSize, maxLines = 1, softWrap = false)
+                            Text(label, color = c.ink2, fontSize = labelSize, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -102,7 +87,7 @@ fun YearHeatmap(
                             first.month.getDisplayName(TextStyle.SHORT, Locale.FRENCH)
                                 .take(3)
                                 .replaceFirstChar { it.uppercase() },
-                            color = Palette.muted,
+                            color = c.ink2,
                             fontSize = labelSize,
                             maxLines = 1,
                             softWrap = false,
@@ -133,16 +118,16 @@ fun YearHeatmap(
                             val day = gridStart.plusDays(col * 7L + row)
                             if (day.year != year) continue
                             val topLeft = Offset(col * p + inset, row * p + inset)
-                            drawRoundRect(currentColorAt.value(day) ?: Palette.empty, topLeft, Size(s, s), radius)
+                            drawRoundRect(currentColorAt.value(day) ?: c.surface2, topLeft, Size(s, s), radius)
                             // Repère discret sur aujourd'hui, pour savoir où on en est dans l'année.
                             if (day == today && day != selected) {
                                 drawRoundRect(
-                                    Palette.muted, topLeft, Size(s, s), radius,
+                                    c.today, topLeft, Size(s, s), radius,
                                     style = Stroke(1.5.dp.toPx()),
                                 )
                             }
                             if (day == selected) {
-                                drawRoundRect(Color.White, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
+                                drawRoundRect(c.selection, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
                             }
                         }
                     }
@@ -167,6 +152,7 @@ fun RecentHeatmap(
     val currentOnSelect = rememberUpdatedState(onSelect)
     val currentColorAt = rememberUpdatedState(colorAt)
     val currentSelected = rememberUpdatedState(selected)
+    val c = LocalSleepColors.current
     val lastMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
     BoxWithConstraints(Modifier.fillMaxWidth().height(height)) {
@@ -201,16 +187,16 @@ fun RecentHeatmap(
                     val day = gridStart.plusDays(col * 7L + row)
                     if (day.isAfter(today)) continue
                     val topLeft = Offset(col * p + inset, row * p + inset)
-                    drawRoundRect(currentColorAt.value(day) ?: Palette.empty, topLeft, Size(s, s), radius)
+                    drawRoundRect(currentColorAt.value(day) ?: c.surface2, topLeft, Size(s, s), radius)
                     // Repère discret sur aujourd'hui, pour savoir où on en est.
                     if (day == today && day != selected) {
                         drawRoundRect(
-                            Palette.muted, topLeft, Size(s, s), radius,
+                            c.today, topLeft, Size(s, s), radius,
                             style = Stroke(1.5.dp.toPx()),
                         )
                     }
                     if (day == selected) {
-                        drawRoundRect(Color.White, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
+                        drawRoundRect(c.selection, topLeft, Size(s, s), radius, style = Stroke(1.5.dp.toPx()))
                     }
                 }
             }
@@ -220,13 +206,14 @@ fun RecentHeatmap(
 
 @Composable
 fun Legend(metric: Metric, scale: Scale) {
+    val c = LocalSleepColors.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(metric.label, color = Palette.muted, fontSize = 12.sp)
+        Text(metric.label, color = c.ink2, fontSize = 12.sp)
         Spacer(Modifier.weight(1f))
         scale.colors.zip(scale.labels).forEach { (color, label) ->
             Box(Modifier.size(10.dp).background(color, RoundedCornerShape(3.dp)))
             Spacer(Modifier.width(3.dp))
-            Text(label, color = Palette.muted, fontSize = 10.sp, maxLines = 1, softWrap = false)
+            Text(label, color = c.ink2, fontSize = 10.sp, maxLines = 1, softWrap = false)
             Spacer(Modifier.width(6.dp))
         }
     }

@@ -3,6 +3,8 @@ package com.paul.sleeptrack
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.AtomicFile
+import com.paul.sleeptrack.ui.theme.ThemeChoice
+import com.paul.sleeptrack.ui.theme.ThemeMode
 import org.json.JSONObject
 import java.io.File
 import java.time.Duration
@@ -49,6 +51,9 @@ object Prefs {
     const val HOME_TAP_DETAIL = "home_tap_detail"
     const val START_TAB = "start_tab"
 
+    const val THEME = "theme"
+    const val THEME_MODE = "theme_mode"
+
     const val DEFAULT_EVENING_HOUR = 22
     const val DEFAULT_WEEKLY_HOUR = 19
     const val DEFAULT_GOAL_MINUTES = Goals.DEFAULT_SLEEP_MINUTES
@@ -65,6 +70,11 @@ object Prefs {
 
     fun of(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    /** Thème et mode choisis ; Aube et le mode du système par défaut. */
+    fun appearance(context: Context): Appearance = of(context).let {
+        Appearance(ThemeChoice.of(it.getString(THEME, null)), ThemeMode.of(it.getString(THEME_MODE, null)))
+    }
 
     fun eveningEnabled(context: Context) = of(context).getBoolean(EVENING_ENABLED, false)
     fun eveningHour(context: Context) = of(context).getInt(EVENING_HOUR, DEFAULT_EVENING_HOUR)
@@ -226,6 +236,8 @@ object Prefs {
         Reminders.reschedule(context)
     }
 }
+
+data class Appearance(val theme: ThemeChoice = ThemeChoice.AUBE, val mode: ThemeMode = ThemeMode.SYSTEM)
 
 /** Ce que l'écran principal affiche sous la grille, et la taille des cases. */
 data class DisplayPrefs(

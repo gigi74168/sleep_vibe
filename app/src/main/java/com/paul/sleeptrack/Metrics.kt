@@ -141,7 +141,8 @@ class Scale(
     fun colorOf(value: Double): Color = colors[levelOf(value)]
 }
 
-fun scaleFor(metric: Metric, goals: Goals): Scale {
+/** Les seuils suivent les objectifs ; les cinq couleurs, [levels], viennent du thème. */
+fun scaleFor(metric: Metric, goals: Goals, levels: List<Color>): Scale {
     val bounds = boundsFor(metric, goals)
     // Libellés du plus bas au plus haut ; l'écran les lit à l'envers, du pire au meilleur.
     val labels = when (metric) {
@@ -150,7 +151,7 @@ fun scaleFor(metric: Metric, goals: Goals): Scale {
         Metric.RECOVERY -> rangeLabels(bounds.map { it.roundToInt() }, { it.toString() }, "")
     }
     val reversed = metric == Metric.SCREEN
-    return Scale(bounds, reversed, Palette.levels, if (reversed) labels.reversed() else labels)
+    return Scale(bounds, reversed, levels, if (reversed) labels.reversed() else labels)
 }
 
 /** « <5h », « 5-6h »… « 8h+ » : l'unité n'est écrite qu'une fois par libellé. */
@@ -179,21 +180,24 @@ fun shortGoal(metric: Metric, value: Int): String = when (metric) {
 /** Une tuile de statistique, partagée entre l'écran principal et l'image exportée. */
 data class StatTile(val label: String, val value: String, val color: Color)
 
-fun statTiles(metric: Metric, data: HealthData, scale: Scale, goals: Goals): List<StatTile> {
+/** [neutral] : la couleur d'une tuile sans valeur. */
+fun statTiles(metric: Metric, data: HealthData, scale: Scale, goals: Goals, neutral: Color): List<StatTile> {
     val series = data.series(metric)
     if (series.isEmpty()) return emptyList()
     val today = LocalDate.now()
     val average = series.values.average()
     val last7 = series.filterKeys { it > today.minusDays(7) }.values
     val recent = if (last7.isEmpty()) null else last7.average()
+    val best = scale.colors.last()
+    val worst = scale.colors.first()
 
     fun tile(label: String, value: Double) = StatTile(label, metric.format(value), scale.colorOf(value))
     val recentTile = recent?.let { tile("7 derniers jours", it) }
-        ?: StatTile("7 derniers jours", "—", Palette.muted)
+        ?: StatTile("7 derniers jours", "—", neutral)
 
     // La quatrième tuile compte les bons jours, selon l'objectif ; elle est verte s'il y en a.
     fun countTile(label: String, n: Int) =
-        StatTile(label, "$n", if (n > 0) Palette.levels.last() else Palette.levels[0])
+        StatTile(label, "$n", if (n > 0) best else worst)
 
     return when (metric) {
         Metric.SLEEP -> {
@@ -206,7 +210,7 @@ fun statTiles(metric: Metric, data: HealthData, scale: Scale, goals: Goals): Lis
                 tile("Record", series.values.max()),
                 StatTile(
                     "Nuits < ${shortGoal(metric, short)}", "$count",
-                    if (count > 0) Palette.levels[0] else Palette.levels.last(),
+                    if (count > 0) worst else best,
                 ),
             )
         }

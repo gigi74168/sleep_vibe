@@ -7,7 +7,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import com.paul.sleeptrack.ui.theme.LocalSleepColors
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.DayOfWeek
@@ -68,6 +70,8 @@ fun streakTiles(
     data: HealthData,
     goals: Goals,
     year: Int,
+    levels: List<Color>,
+    neutral: Color,
     today: LocalDate = LocalDate.now(),
 ): Pair<StatTile, StatTile>? {
     val target = targetFor(metric, goals)
@@ -75,8 +79,8 @@ fun streakTiles(
     if (series.size < 7) return null
     val streaks = streaksOf(series, target.good, today)
     if (streaks.best == 0) {
-        return StatTile("Objectif atteint", metric.countLabel(0), Palette.muted) to
-            StatTile("Meilleure série", "—", Palette.muted)
+        return StatTile("Objectif atteint", metric.countLabel(0), neutral) to
+            StatTile("Meilleure série", "—", neutral)
     }
 
     // Une « série en cours » n'a de sens que sur l'année qui court.
@@ -84,12 +88,12 @@ fun streakTiles(
         StatTile(
             "Série en cours",
             if (streaks.current == 0) "—" else metric.countLabel(streaks.current),
-            if (streaks.current > 0) Palette.levels.last() else Palette.muted,
+            if (streaks.current > 0) levels.last() else neutral,
         )
     } else {
-        StatTile("Objectif atteint", metric.countLabel(streaks.reached), Palette.levels[3])
+        StatTile("Objectif atteint", metric.countLabel(streaks.reached), levels[3])
     }
-    val best = StatTile("Meilleure série", metric.countLabel(streaks.best), Palette.levels.last())
+    val best = StatTile("Meilleure série", metric.countLabel(streaks.best), levels.last())
     return first to best
 }
 
@@ -103,17 +107,18 @@ fun weekAverages(series: Map<LocalDate, Double>): Map<DayOfWeek, Double> =
 /** Moyenne de chaque jour de la semaine : ce que la grille annuelle ne montre pas. */
 @Composable
 fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolean) {
+    val c = LocalSleepColors.current
     val series = data.series(metric)
     val averages = weekAverages(series)
 
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Semaine type", color = Palette.text, fontWeight = FontWeight.SemiBold)
+        Text("Semaine type", color = c.ink, fontWeight = FontWeight.SemiBold)
 
         if (averages.size < 7 || series.size < 21) {
             Text(
                 "Il faut environ trois semaines pour que la moyenne de chaque jour veuille dire " +
                     "quelque chose (${metric.countLabel(series.size)} pour l'instant).",
-                color = Palette.muted,
+                color = c.ink2,
                 fontSize = 13.sp,
             )
             return@Column
@@ -139,7 +144,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                 ) {
                     Text(
                         compactValue(metric, value),
-                        color = Palette.muted,
+                        color = c.ink2,
                         fontSize = 9.sp,
                         maxLines = 1,
                         softWrap = false,
@@ -154,7 +159,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
                     Spacer(Modifier.height(5.dp))
                     Text(
                         day.getDisplayName(TextStyle.NARROW, Locale.FRENCH).uppercase(),
-                        color = Palette.muted,
+                        color = c.ink2,
                         fontSize = 11.sp,
                     )
                 }
@@ -163,7 +168,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
 
         Text(
             weekSentence(metric, low.key, low.value, high.key, high.value),
-            color = Palette.muted,
+            color = c.ink2,
             fontSize = 13.sp,
         )
 
@@ -171,7 +176,7 @@ fun WeekProfile(metric: Metric, data: HealthData, scale: Scale, showNote: Boolea
             Text(
                 "Les barres se comparent entre elles, pas à zéro : c'est l'écart entre tes jours " +
                     "qui est dessiné, pas leur valeur absolue.",
-                color = Palette.muted.copy(alpha = 0.7f),
+                color = c.ink3,
                 fontSize = 11.sp,
             )
         }

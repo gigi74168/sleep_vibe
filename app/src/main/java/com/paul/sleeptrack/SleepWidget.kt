@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.RemoteViews
+import com.paul.sleeptrack.ui.theme.AubeTokens
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -109,7 +110,7 @@ private fun renderWidget(context: Context, manager: AppWidgetManager, appWidgetI
 
     val metric = Prefs.widgetMetric(context)
     val data = DataCache.load(context).withRecovery(Prefs.recoveryConfig(context))
-    val bitmap = renderStrip(metric, data, widthPx, heightPx, goals = Prefs.goals(context))
+    val bitmap = renderStrip(metric, data, widthPx, heightPx, AubeTokens.Classique, goals = Prefs.goals(context))
 
     val open = PendingIntent.getActivity(
         context,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.core.content.FileProvider
+import com.paul.sleeptrack.ui.theme.AubeTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -28,7 +29,7 @@ suspend fun shareYearImage(context: Context, year: Int, metric: Metric, data: He
     // Le rendu et l'encodage PNG bloqueraient l'interface, jusqu'à quelques secondes en
     // 4K : ils se font à côté, seul l'envoi du sélecteur revient sur le fil principal.
     val uri = withContext(Dispatchers.Default) {
-        val bitmap = renderYearCard(year, metric, data, Prefs.goals(context), quality.widthPx)
+        val bitmap = renderYearCard(year, metric, data, Prefs.goals(context), AubeTokens.Classique, quality.widthPx)
         val file = try {
             writePng(context, bitmap, "sleeptrack-${metric.name.lowercase()}-$year.png")
         } finally {
