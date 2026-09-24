@@ -12,8 +12,8 @@ android {
         applicationId = "com.paul.sleeptrack"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "3.1.1-beta"
+        versionCode = 14
+        versionName = "3.5.0-beta"
     }
 
     buildTypes {
